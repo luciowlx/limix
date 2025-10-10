@@ -23,6 +23,15 @@
 ## 变更历史
 
 ### 2025-10-10
+- [Build/Automation] 引入 Husky + Commitlint，并新增 pre-commit 自动校验：当 src/styles/vite.config.ts/package.json 有改动时，要求本次提交同步更新 CHANGELOG.md 且包含当天日期段（如：`### 2025-10-10`）。
+  - 涉及文件：
+    - package.json（新增 devDependencies 与 prepare/check 脚本）
+    - commitlint.config.cjs（提交信息规范：Conventional Commits）
+    - scripts/check-changelog.js（自定义校验脚本）
+    - .husky/pre-commit、.husky/commit-msg（Git 钩子）
+  - 说明/验证：修改 src 任意文件后尝试提交，若未更新 CHANGELOG.md 将被阻止；更新并暂存 CHANGELOG 后提交可通过。提交信息需符合 Conventional Commits 规范。
+
+### 2025-10-10
 - [Fix/UX] 预处理创建流程补全：新增 Step 0“选择数据集”，统一从列表页与行内入口的流程顺序
   - 背景：点击“创建预处理任务”直接跳到“字段选择”，缺失数据集选择步骤，导致不同入口的流程不一致。
   - 变更点：
