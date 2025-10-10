@@ -28,6 +28,7 @@ import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import { X, Search, Grid3X3, List, ChevronDown, Calendar, Users, Database, TrendingUp, Clock, CheckCircle, Settings, UserPlus, Mail, Trash2, Eye, Archive, Copy, ToggleLeft, ToggleRight } from "lucide-react";
 import { Toaster } from "./components/ui/sonner";
+import { Checkbox } from "./components/ui/checkbox";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("看板");
@@ -352,6 +353,17 @@ export default function App() {
     setIsArchiveConfirmOpen(true);
   };
 
+  // 复制项目选项（默认全部勾选）
+  const [duplicateOptions, setDuplicateOptions] = useState({
+    copyTasks: true,
+    copyDatasets: true,
+    copyMembers: true,
+  });
+
+  const toggleDuplicateOption = (key: keyof typeof duplicateOptions, value: boolean) => {
+    setDuplicateOptions((prev) => ({ ...prev, [key]: value }));
+  };
+
   const handleConfirmArchive = () => {
     // 处理归档项目逻辑
     console.log("归档项目:", selectedProject?.title);
@@ -368,7 +380,14 @@ export default function App() {
   const handleConfirmDuplicate = () => {
     // 处理复制项目逻辑
     const duplicatedProjectName = `${selectedProject?.title} - 副本`;
-    console.log("复制项目:", duplicatedProjectName);
+    const { copyTasks, copyDatasets, copyMembers } = duplicateOptions;
+    const onlyBasicInfo = !copyTasks && !copyDatasets && !copyMembers;
+    console.log("复制项目:", duplicatedProjectName, {
+      copyTasks,
+      copyDatasets,
+      copyMembers,
+      strategy: onlyBasicInfo ? "仅复制基础信息（项目名称与描述）" : "复制所选内容",
+    });
     setIsDuplicateConfirmOpen(false);
     setIsProjectManageOpen(false);
     // 这里可以添加实际的项目复制逻辑
@@ -1259,7 +1278,7 @@ export default function App() {
 
             {/* 复制项目确认弹窗 */}
             <Dialog open={isDuplicateConfirmOpen} onOpenChange={setIsDuplicateConfirmOpen}>
-              <DialogContent className="sm:max-w-[400px]">
+              <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     <Copy className="h-5 w-5 text-blue-600" />
@@ -1276,7 +1295,38 @@ export default function App() {
                       <strong>新项目名称：</strong>{selectedProject?.title} - 副本
                     </div>
                     <div className="text-xs text-blue-600 mt-1">
-                      复制后的项目将包含原项目的所有设置和配置
+                      可选择复制任务、数据集与项目成员；若取消所有选项，则仅复制项目基础信息（名称与描述）。
+                    </div>
+                  </div>
+
+                  {/* 复制选项（默认全部勾选） */}
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">选择需要复制的内容（可选）：</div>
+                    <div className="grid grid-cols-1 gap-3">
+                      <label className="flex items-center gap-3 cursor-pointer select-none">
+                        <Checkbox
+                          checked={duplicateOptions.copyTasks}
+                          onCheckedChange={(checked) => toggleDuplicateOption("copyTasks", Boolean(checked))}
+                          aria-label="复制项目下的任务"
+                        />
+                        <span className="text-sm">复制项目下的任务</span>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer select-none">
+                        <Checkbox
+                          checked={duplicateOptions.copyDatasets}
+                          onCheckedChange={(checked) => toggleDuplicateOption("copyDatasets", Boolean(checked))}
+                          aria-label="复制项目下的数据集"
+                        />
+                        <span className="text-sm">复制项目下的数据集</span>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer select-none">
+                        <Checkbox
+                          checked={duplicateOptions.copyMembers}
+                          onCheckedChange={(checked) => toggleDuplicateOption("copyMembers", Boolean(checked))}
+                          aria-label="复制项目成员"
+                        />
+                        <span className="text-sm">复制项目成员</span>
+                      </label>
                     </div>
                   </div>
                 </div>

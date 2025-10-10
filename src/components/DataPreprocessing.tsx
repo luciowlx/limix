@@ -90,28 +90,48 @@ interface ProcessingResult {
 
 export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditional' }: DataPreprocessingProps) {
   const [currentMode, setCurrentMode] = useState<'traditional' | 'solo'>(mode);
-  const [isLoading, setIsLoading] = useState(true);
+  // 初始不加载字段信息，先进行“选择数据集”步骤
+  const [isLoading, setIsLoading] = useState(false);
   const [fields, setFields] = useState<FieldInfo[]>([]);
   const [cleaningRules, setCleaningRules] = useState<CleaningRule[]>([]);
-  const [currentStep, setCurrentStep] = useState(1);
+  // 新增 Step 0：选择数据集
+  const [currentStep, setCurrentStep] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingResult, setProcessingResult] = useState<ProcessingResult | null>(null);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [jsonConfig, setJsonConfig] = useState('');
   const [showJsonEditor, setShowJsonEditor] = useState(false);
+
+  // 数据集选择相关状态（mock 数据集列表）
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string | undefined>(datasetId);
+  const datasetOptions = [
+    { id: '1', name: '生产线传感器数据集', type: 'IoT传感器', size: '120MB', rows: '125,000', columns: '32', completeness: 92 },
+    { id: '2', name: 'ERP系统数据集', type: '业务记录', size: '85MB', rows: '98,500', columns: '24', completeness: 88 },
+    { id: '3', name: '设备维保日志', type: '日志数据', size: '40MB', rows: '250,000', columns: '12', completeness: 76 },
+    { id: '4', name: '质量检测结果集', type: '检测记录', size: '65MB', rows: '45,200', columns: '16', completeness: 81 }
+  ];
   
   // 确认弹窗状态
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'apply' | 'preview' | null>(null);
 
-  // 模拟数据加载
+  // 打开对话框时，如果来自具体数据集入口，预选该数据集；但仍停留在 Step 0
   useEffect(() => {
-    if (isOpen && datasetId) {
-      loadDatasetInfo();
+    if (isOpen) {
+      setCurrentStep(0);
+      setSelectedDatasetId(datasetId);
+      setIsLoading(false);
     }
   }, [isOpen, datasetId]);
 
-  const loadDatasetInfo = async () => {
+  // 进入字段选择步骤时，根据选中的数据集加载字段信息
+  useEffect(() => {
+    if (isOpen && currentStep === 1 && selectedDatasetId) {
+      loadDatasetInfo(selectedDatasetId);
+    }
+  }, [isOpen, currentStep, selectedDatasetId]);
+
+  const loadDatasetInfo = async (id: string) => {
     setIsLoading(true);
     try {
       // 模拟API调用
@@ -247,6 +267,15 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // 从“选择数据集”进入下一步：字段选择
+  const proceedToFieldSelection = () => {
+    if (!selectedDatasetId) {
+      toast.warning('请先选择目标数据集');
+      return;
+    }
+    setCurrentStep(1);
   };
 
   // 字段选择处理
@@ -446,7 +475,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-6xl max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>数据预处理 - {currentMode === 'traditional' ? '传统模式' : 'Solo模式'}</span>
@@ -486,14 +515,15 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
           <SoloDataCleaning
             isOpen={true}
             onClose={() => {}}
-            datasetId={datasetId}
+            datasetId={selectedDatasetId}
           />
         ) : (
           <div className="space-y-6">
             {/* 步骤指示器 */}
             <div className="flex items-center justify-center space-x-4">
               {[
-                { step: 1, title: '字段选择', icon: Database },
+                { step: 0, title: '选择数据集', icon: Database },
+                { step: 1, title: '字段选择', icon: Layers },
                 { step: 2, title: '规则配置', icon: Settings },
                 { step: 3, title: '预览结果', icon: Eye }
               ].map(({ step, title, icon: Icon }) => (
@@ -525,23 +555,74 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
             {currentMode === 'traditional' ? (
               <Tabs value={currentStep.toString()} onValueChange={(value) => setCurrentStep(parseInt(value))}>
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-4">
+                  <TabsTrigger value="0">选择数据集</TabsTrigger>
                   <TabsTrigger value="1">字段选择</TabsTrigger>
                   <TabsTrigger value="2">规则配置</TabsTrigger>
                   <TabsTrigger value="3">预览结果</TabsTrigger>
                 </TabsList>
+
+                {/* 选择数据集（Step 0）*/}
+                <TabsContent value="0" className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center space-x-2">
+                        <Database className="h-5 w-5" />
+                        <span>选择目标数据集</span>
+                        {selectedDatasetId && (
+                          <Badge variant="secondary">已选择：{datasetOptions.find(d => d.id === selectedDatasetId)?.name || selectedDatasetId}</Badge>
+                        )}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label>数据集</Label>
+                          <Select value={selectedDatasetId} onValueChange={(v) => setSelectedDatasetId(v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="请选择数据集" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {datasetOptions.map(ds => (
+                                <SelectItem key={ds.id} value={ds.id}>
+                                  {ds.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          <p>提示：</p>
+                          <ul className="list-disc list-inside space-y-1">
+                            <li>从任意入口发起预处理，流程保持一致：先选择数据集，再进行字段与规则配置。</li>
+                            <li>从数据集行内操作进入时，这里会自动预选对应数据集。</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex justify-end">
+                    <Button onClick={proceedToFieldSelection} disabled={!selectedDatasetId}>
+                      下一步：字段选择
+                    </Button>
+                  </div>
+                </TabsContent>
 
                 {/* 字段选择 */}
                 <TabsContent value="1" className="space-y-4">
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center space-x-2">
-                        <Database className="h-5 w-5" />
+                        <Layers className="h-5 w-5" />
                         <span>字段信息</span>
                         <Badge variant="secondary">{fields.length} 个字段</Badge>
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
+                      {!selectedDatasetId && (
+                        <div className="text-sm text-orange-600 mb-2">⚠️ 未选择数据集，请返回上一步选择数据集。</div>
+                      )}
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -1150,7 +1231,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
       {/* 确认弹窗 */}
       <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <DialogContent className="max-w-md">
+  <DialogContent className="sm:max-w-md max-w-md w-[95vw] sm:w-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center space-x-2">
               <AlertTriangle className="h-5 w-5 text-orange-500" />

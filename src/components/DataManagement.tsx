@@ -192,6 +192,71 @@ export function DataManagement({
   // 二级菜单状态
   const [activeSubmenu, setActiveSubmenu] = useState<'datasets' | 'preprocessing'>('datasets');
 
+  // 预处理任务列表数据与操作
+  interface PreprocessingTask {
+    id: number;
+    name: string;
+    dataset: string;
+    type: string;
+    status: 'completed' | 'running' | 'pending';
+    operations: string[];
+    startTime?: string | null;
+    progress?: number; // 仅在进行中展示进度
+  }
+
+  const [preprocessingTasks, setPreprocessingTasks] = useState<PreprocessingTask[]>([
+    {
+      id: 1,
+      name: '传感器数据预处理',
+      dataset: '生产线传感器数据集',
+      type: '数据清洗',
+      status: 'completed',
+      operations: ['异常值处理', '缺失值处理', '数据标准化'],
+      startTime: '2024-01-15 09:00:00'
+    },
+    {
+      id: 2,
+      name: '缺陷记录清洗正则',
+      dataset: '生产线缺陷记录集',
+      type: '特征工程',
+      status: 'running',
+      operations: ['特征选择', '特征转换', '特征组合'],
+      startTime: '2024-01-15 14:00:00',
+      progress: 65
+    },
+    {
+      id: 3,
+      name: 'ERP数据质量评估',
+      dataset: 'ERP系统数据集',
+      type: '质量评估',
+      status: 'pending',
+      operations: ['完整性检测', '一致性校验', '准确性评估'],
+      startTime: null
+    }
+  ]);
+
+  const handleStartTask = (id: number) => {
+    setPreprocessingTasks(prev => prev.map(t => (
+      t.id === id ? { ...t, status: 'running', progress: 0, startTime: new Date().toLocaleString() } : t
+    )));
+    toast.success('任务已开始执行');
+  };
+
+  const handleStopTask = (id: number) => {
+    setPreprocessingTasks(prev => prev.map(t => (
+      t.id === id ? { ...t, status: 'pending', progress: undefined } : t
+    )));
+    toast.success('任务已停止');
+  };
+
+  const handleViewTask = (id: number) => {
+    const task = preprocessingTasks.find(t => t.id === id);
+    if (task) {
+      toast.info(`查看任务详情：${task.name}`);
+      // 这里可扩展：打开全屏详情页或任务详情弹窗
+    }
+  };
+
   useEffect(() => {
     setIsLocalUploadDialogOpen(isUploadDialogOpen);
   }, [isUploadDialogOpen]);
@@ -1590,15 +1655,94 @@ export function DataManagement({
         </Dialog>
       )}
 
-      {/* 数据预处理内容 */}
+      {/* 数据预处理任务列表（恢复为列表优先展示） */}
       {activeSubmenu === 'preprocessing' && (
         <div className="space-y-6">
-          <DataPreprocessing
-            isOpen={true}
-            onClose={() => {}}
-            datasetId={selectedDatasetForPreprocessing?.id?.toString()}
-            mode={preprocessingMode}
-          />
+          {/* 顶部提示（处理中的任务） */}
+          <Card>
+            <CardContent className="flex items-center gap-3 p-4">
+              <Info className="h-5 w-5 text-blue-600" />
+              <div>
+                <p className="text-sm font-medium text-blue-700">处理中的任务</p>
+                <p className="text-xs text-blue-600">当前有 {preprocessingTasks.filter(t => t.status === 'running').length} 个预处理任务正在执行中，请耐心等待处理完成。</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 标题与创建按钮 */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">预处理任务管理</h2>
+            <Button onClick={() => {
+              setSelectedDatasetForPreprocessing(null);
+              setIsDataPreprocessingOpen(true);
+            }}>
+              <Plus className="h-4 w-4 mr-2" />
+              创建预处理任务
+            </Button>
+          </div>
+
+          {/* 任务列表表格 */}
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>任务名称</TableHead>
+                  <TableHead>数据集</TableHead>
+                  <TableHead>类型</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>操作内容</TableHead>
+                  <TableHead>开始时间</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {preprocessingTasks.map(task => (
+                  <TableRow key={task.id}>
+                    <TableCell className="font-medium">{task.name}</TableCell>
+                    <TableCell>{task.dataset}</TableCell>
+                    <TableCell>{task.type}</TableCell>
+                    <TableCell>
+                      {task.status === 'completed' && (
+                        <Badge variant="default">已完成</Badge>
+                      )}
+                      {task.status === 'running' && (
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">进行中</Badge>
+                          {typeof task.progress === 'number' && (
+                            <div className="flex items-center gap-2 w-32">
+                              <Progress value={task.progress} className="h-2" />
+                              <span className="text-xs text-gray-600">{task.progress}%</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {task.status === 'pending' && (
+                        <Badge variant="outline">待执行</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {task.operations.map((op, idx) => (
+                          <Badge key={idx} variant="secondary" className="text-xs">{op}</Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell>{task.startTime || '-'}</TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>查看详情</Button>
+                        {task.status === 'running' ? (
+                          <Button variant="destructive" size="sm" onClick={() => handleStopTask(task.id)}>停止</Button>
+                        ) : (
+                          <Button size="sm" onClick={() => handleStartTask(task.id)}>开始执行</Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
         </div>
       )}
     </div>
