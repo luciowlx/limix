@@ -23,6 +23,19 @@
 ## 变更历史
 
 ### 2025-10-10
+- [Feature/Style] 报表页交互维度选择：新增无数据时的模拟字段选项与默认全选；未选项默认文字色改为黑色
+  - 涉及文件：
+    - src/components/ReportView.tsx（FALLBACK_X/FALLBACK_Y；未选标签文字色、边框调整；初始化选择与联动）
+  - 说明/验证：在 http://localhost:3000/ 打开“分析报表”，若未加载数据，X 显示 12 个示例字段、Y 显示 prediction/actual，均可多选；未选标签文本为黑色，交互与下方数据表联动正常。
+
+### 2025-10-10
+- [Fix/UX] 移除项目详情中的“项目完成度”字段与进度条显示
+  - 背景：当前系统无法准确计算完成度指标，展示可能造成误导。
+  - 涉及文件：
+    - src/components/ProjectDetailCards.tsx（删除完成度区块与 Progress 引用）
+  - 说明/验证：在 http://localhost:3000/ 进入项目详情页，基本信息卡片中不再显示“项目完成度”与进度条，布局保持正常。
+
+### 2025-10-10
 - [Build/Automation] 引入 Husky + Commitlint，并新增 pre-commit 自动校验：当 src/styles/vite.config.ts/package.json 有改动时，要求本次提交同步更新 CHANGELOG.md 且包含当天日期段（如：`### 2025-10-10`）。
   - 涉及文件：
     - package.json（新增 devDependencies 与 prepare/check 脚本）
