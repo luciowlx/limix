@@ -33,6 +33,8 @@ type DataSourceType = 'mysql' | 'postgresql' | 'mongodb' | 'redis' | 'elasticsea
 interface BaseFormData {
   name: string;
   description: string;
+  projectId: string; // 所属项目（必填）
+  permission: 'private' | 'team' | 'public'; // 权限设置（默认仅项目成员可见）
   dataSourceType: DataSourceType;
   syncFrequency: 'daily' | 'hourly' | 'every10min';
   cronExpression?: string;
@@ -97,6 +99,8 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
   const [formData, setFormData] = useState<FormData>({
     name: '',
     description: '',
+    projectId: '',
+    permission: 'private',
     dataSourceType: 'mysql',
     syncFrequency: 'daily',
     isAdvancedCron: false,
@@ -118,6 +122,8 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
     setFormData({
       name: '',
       description: '',
+      projectId: '',
+      permission: 'private',
       dataSourceType: 'mysql',
       syncFrequency: 'daily',
       isAdvancedCron: false,
@@ -137,6 +143,8 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
     const baseData = {
       name: formData.name,
       description: formData.description,
+      projectId: formData.projectId,
+      permission: formData.permission,
       dataSourceType: type,
       syncFrequency: formData.syncFrequency,
       isAdvancedCron: formData.isAdvancedCron,
@@ -208,7 +216,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
     }
     setConnectionStatus('idle');
     setConnectionError('');
-  }, [formData.name, formData.description, formData.syncFrequency, formData.isAdvancedCron, formData.cronExpression]);
+  }, [formData.name, formData.description, formData.projectId, formData.permission, formData.syncFrequency, formData.isAdvancedCron, formData.cronExpression]);
 
   // 测试连接
   const handleTestConnection = useCallback(async () => {
@@ -250,6 +258,11 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
       return;
     }
 
+    if (!formData.projectId) {
+      toast.error('请选择所属项目');
+      return;
+    }
+
     if (connectionStatus !== 'success') {
       toast.error('请先测试连接成功后再创建订阅');
       return;
@@ -263,8 +276,12 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
       
       const subscriptionId = 'sub-' + Date.now();
       
+      const visibilityText = formData.permission === 'public'
+        ? '公开（非项目成员可查看）'
+        : `项目内（${formData.projectId} 成员可见）`;
+
       toast.success('订阅创建成功', {
-        description: `订阅 "${formData.name}" 已成功创建`
+        description: `订阅 "${formData.name}" 已成功创建 · 所属项目：${formData.projectId} · 可见性：${visibilityText}`
       });
 
       if (onSubscriptionSuccess) {
@@ -281,6 +298,15 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
       setIsCreating(false);
     }
   }, [formData.name, connectionStatus, onSubscriptionSuccess, onClose, resetForm]);
+
+  // 模拟项目列表（后续可替换为真实项目数据）
+  const mockProjects = [
+    { id: 'proj_001', name: '钢铁缺陷预测' },
+    { id: 'proj_002', name: '电力能源预测' },
+    { id: 'proj_003', name: '工艺时序预测' },
+    { id: 'proj_004', name: '设备故障预测' }
+  ];
+  const getProjectName = (id: string) => mockProjects.find(p => p.id === id)?.name || '未选择项目';
 
   // 关闭对话框
   const handleClose = useCallback(() => {
@@ -826,6 +852,63 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* 所属项目与权限设置 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="project">所属项目 *</Label>
+                  <Select
+                    value={(formData as any).projectId}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, projectId: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="请选择所属项目" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {mockProjects.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="permission">权限设置</Label>
+                  <Select
+                    value={(formData as any).permission}
+                    onValueChange={(value: 'private' | 'team' | 'public') => 
+                      setFormData(prev => ({ ...prev, permission: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="private">私有</SelectItem>
+                      <SelectItem value="team">团队</SelectItem>
+                      <SelectItem value="public">公开</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* 可见性预览与说明 */}
+              <div className="rounded-md border p-3 bg-gray-50">
+                <div className="flex items-center gap-2 mb-2">
+                  {(formData as any).permission === 'public' ? (
+                    <Badge variant="default" className="bg-green-100 text-green-700 border-green-200">公开数据</Badge>
+                  ) : (
+                    <Badge variant="outline" className="border-purple-300 text-purple-700">项目内数据</Badge>
+                  )}
+                  <span className="text-sm text-gray-700">
+                    {(formData as any).permission === 'public'
+                      ? '公开权限将允许非项目成员查看该数据（覆盖项目归属限制）'
+                      : `仅项目“${getProjectName((formData as any).projectId)}”成员可见`}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500">
+                  注意：所属项目为必填项；默认仅对项目成员可见；将权限设置为“公开”后，任何用户均可查看。
+                </p>
               </div>
 
               <div className="space-y-2">

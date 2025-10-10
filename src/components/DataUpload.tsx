@@ -50,6 +50,7 @@ interface UploadFile {
 interface FormData {
   name: string;
   description: string;
+  projectId: string; // 所属项目（必填）
   permission: 'private' | 'team' | 'public';
   mode: 'traditional' | 'solo';
   tags: Array<{ name: string; color: string }>;
@@ -61,6 +62,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
   const [formData, setFormData] = useState<FormData>({
     name: '',
     description: '',
+    projectId: '',
     permission: 'private',
     mode: 'traditional',
     tags: []
@@ -68,12 +70,23 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 模拟项目列表（后续可替换为真实项目数据）
+  const mockProjects = [
+    { id: 'proj_001', name: '钢铁缺陷预测' },
+    { id: 'proj_002', name: '电力能源预测' },
+    { id: 'proj_003', name: '工艺时序预测' },
+    { id: 'proj_004', name: '设备故障预测' }
+  ];
+
+  const getProjectName = (id: string) => mockProjects.find(p => p.id === id)?.name || '未选择项目';
+
   // 重置状态
   const resetState = useCallback(() => {
     setFiles([]);
     setFormData({
       name: '',
       description: '',
+      projectId: '',
       permission: 'private',
       mode: 'traditional',
       tags: []
@@ -272,6 +285,11 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
       return;
     }
 
+    if (!formData.projectId) {
+      toast.error('请选择所属项目');
+      return;
+    }
+
     if (files.length === 0) {
       toast.error('请选择要上传的文件');
       return;
@@ -360,7 +378,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
 
         <div className="space-y-6">
           {/* 基本信息表单 */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="name">数据源名称 *</Label>
               <Input
@@ -371,12 +389,28 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="project">所属项目 *</Label>
+              <Select
+                value={formData.projectId}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, projectId: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择所属项目" />
+                </SelectTrigger>
+                <SelectContent>
+                  {mockProjects.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="permission">权限设置</Label>
               <Select
                 value={formData.permission}
                 onValueChange={(value: 'private' | 'team' | 'public') => 
                   setFormData(prev => ({ ...prev, permission: value }))
-                }
+              }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -388,6 +422,25 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* 可见性预览与说明 */}
+          <div className="rounded-md border p-3 bg-gray-50">
+            <div className="flex items-center gap-2 mb-2">
+              {formData.permission === 'public' ? (
+                <Badge variant="default" className="bg-green-100 text-green-700 border-green-200">公开数据</Badge>
+              ) : (
+                <Badge variant="outline" className="border-purple-300 text-purple-700">项目内数据</Badge>
+              )}
+              <span className="text-sm text-gray-700">
+                {formData.permission === 'public'
+                  ? '公开权限将允许非项目成员查看该数据（覆盖项目归属限制）'
+                  : `仅项目“${getProjectName(formData.projectId)}”成员可见`}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500">
+              注意：所属项目为必填项；默认仅对项目成员可见；将权限设置为“公开”后，任何用户均可查看。
+            </p>
           </div>
 
           <div className="space-y-2">

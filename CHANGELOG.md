@@ -23,6 +23,20 @@
 ## 变更历史
 
 ### 2025-10-10
+- [Feature/UX] 项目详情页（Solo 模式）新增“语音指令入口”与“本次与历史 Solo 会话记录”展示：
+  - 语音入口包含录音按钮（占位实现）、文本输入与执行按钮；执行后将指令转为简化任务并记录。
+  - 会话记录展示简化任务名、时间与“查看详情”入口；详情含原始指令与预计执行步骤。
+  - 涉及文件：
+    - src/components/ProjectDetailCards.tsx（新增 Mic/Square/Send/MessageSquare/Clock/Eye 图标、语义理解示例 semanticSimplify、会话记录 UI 与交互）。
+  - 说明/验证：在 http://localhost:3000/ 进入项目详情（Solo 模式），右下角卡片可输入指令并执行；左下角记录区新增条目，点击“查看详情”展开原始指令与步骤。
+
+- [Feature/Security] 数据上传与数据源新增：强制“所属项目”必选与“权限设置”可见性说明，公开权限覆盖项目成员可见性：
+  - 涉及文件：
+    - src/components/DataUpload.tsx（新增 projectId、permission 字段与校验；可见性预览区）。
+    - src/components/DataSubscription.tsx（新增 projectId、permission 字段与校验；可见性预览区）。
+  - 说明/验证：未选择项目时阻止上传/创建并提示；切换为公开时展示“公开数据”徽标与覆盖说明。
+
+### 2025-10-10
 - [Feature/Style] 报表页交互维度选择：新增无数据时的模拟字段选项与默认全选；未选项默认文字色改为黑色
   - 涉及文件：
     - src/components/ReportView.tsx（FALLBACK_X/FALLBACK_Y；未选标签文字色、边框调整；初始化选择与联动）

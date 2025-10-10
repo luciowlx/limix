@@ -59,3 +59,24 @@ or initiating processes. They communicate interactivity and should have clear, a
   * Visual Style : Text-only with no border, using primary color
   * Usage : For actions that should be available but not emphasized
 -->
+ 
+## 提交规范与自动化检查
+
+本项目已启用 Conventional Commits 规范与 Git 钩子自动化检查：
+
+- 提交信息规范：使用类型前缀（如 `feat|fix|docs|style|refactor|test|build|chore|ci`），示例：
+  - `feat(data-preprocessing): add dataset selection step`
+  - `fix(dialog): prevent horizontal scroll in preprocessing modal`
+  - `docs(changelog): record workflow update`
+- 头部长度限制：提交信息第一行不超过 100 个字符（Commitlint 规则）。
+- pre-commit 校验：当提交包含以下文件改动时，要求同步更新 CHANGELOG.md 且包含当天日期段（`### YYYY-MM-DD`）：
+  - `src/**`、`styles/**`、`vite.config.ts`、`package.json`
+- commit-msg 校验：使用 Commitlint 检查提交信息是否符合规范。
+
+相关文件与脚本：
+- `package.json`：`prepare` 和 `check:changelog` 脚本
+- `commitlint.config.cjs`：提交信息规则配置
+- `scripts/check-changelog.js`：变更日志校验脚本
+- `.husky/pre-commit`、`.husky/commit-msg`：Git 钩子
+
+注意：如遇到网络问题导致 `git push` 失败，可稍后重试或切换网络环境。

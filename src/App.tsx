@@ -11,6 +11,7 @@ import { PersonalizationSettings } from "./components/PersonalizationSettings";
 import { SoloMode } from "./components/SoloMode";
 import { GlobalBot } from "./components/GlobalBot";
 import { FullPageView } from "./components/FullPageView";
+import { ReportView } from "./components/ReportView";
 import GlobalAIAssistant from "./components/GlobalAIAssistant";
 import { DataDetailFullPage } from "./components/DataDetailFullPage";
 import TaskDetailFullPage from "./components/TaskDetailFullPage";
@@ -90,6 +91,7 @@ export default function App() {
 
   // 全页面视图状态
   const [fullPageViewType, setFullPageViewType] = useState<'personal-center' | 'personalization-settings' | 'notification-center' | 'global-bot' | 'ai-assistant' | 'data-detail' | 'task-detail' | null>(null);
+  const [isReportViewOpen, setIsReportViewOpen] = useState(false);
 
   // 数据详情全页面状态
   const [selectedDatasetForFullPage, setSelectedDatasetForFullPage] = useState<any>(null);
@@ -1059,8 +1061,8 @@ export default function App() {
                       console.log("快速预测功能");
                     }}
                     onViewReports={() => {
-                      // TODO: 实现报表查看功能
-                      console.log("查看报表功能");
+                      // 打开查看报表全屏视图，并自动执行清洗-分析-展示流程
+                      setIsReportViewOpen(true);
                     }}
                   />
                 </div>
@@ -1555,6 +1557,11 @@ export default function App() {
           type={fullPageViewType}
           onClose={handleCloseFullPageView}
         />
+      )}
+
+      {/* 报表全屏视图 */}
+      {isReportViewOpen && (
+        <ReportView onClose={() => setIsReportViewOpen(false)} />
       )}
 
       {/* AI助手 */}
