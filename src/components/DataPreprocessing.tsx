@@ -10,7 +10,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Checkbox } from "./ui/checkbox";
-import { Switch } from "./ui/switch";
 import { Progress } from "./ui/progress";
 import { 
   Settings,
@@ -684,28 +683,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                     </CardContent>
                   </Card>
 
-                  <div className="flex justify-between">
-                    <div className="flex space-x-2">
-                      <Button variant="outline" onClick={handleExportConfig}>
-                        <Download className="h-4 w-4 mr-2" />
-                        导出配置
-                      </Button>
-                      <div>
-                        <input
-                          type="file"
-                          accept=".json"
-                          onChange={handleImportConfig}
-                          className="hidden"
-                          id="import-config"
-                        />
-                        <Button variant="outline" asChild>
-                          <label htmlFor="import-config" className="cursor-pointer">
-                            <Upload className="h-4 w-4 mr-2" />
-                            导入配置
-                          </label>
-                        </Button>
-                      </div>
-                    </div>
+                  <div className="flex justify-end">
                     <Button 
                       onClick={() => setCurrentStep(2)}
                       disabled={fields.filter(f => f.selected).length === 0}
@@ -736,13 +714,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                         {cleaningRules.map((rule) => (
                           <Card key={rule.id} className="p-4">
                             <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <Switch
-                                  checked={rule.enabled}
-                                  onCheckedChange={(enabled) => 
-                                    updateCleaningRule(rule.id, { enabled })
-                                  }
-                                />
+                              <div className="flex items-center justify-end">
                                 <Button
                                   size="sm"
                                   variant="ghost"

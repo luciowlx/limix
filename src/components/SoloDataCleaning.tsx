@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -31,6 +31,8 @@ import {
   Clock,
   Activity
 } from "lucide-react";
+import { Label } from "./ui/label";
+import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
 
 interface SoloDataCleaningProps {
@@ -81,6 +83,174 @@ interface DataQualityMetrics {
 }
 
 export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleaningProps) {
+  // 语音指令输入相关状态与引用
+  const [isListening, setIsListening] = useState(false);
+  const [speechText, setSpeechText] = useState('');
+  const [speechStatus, setSpeechStatus] = useState<'idle' | 'listening' | 'processing' | 'error'>('idle');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const animationRef = useRef<number | null>(null);
+
+  // 文本指令与策略联动：关键词映射
+  const strategyKeywordMap: { id: string; keywords: string[] }[] = [
+    { id: 'remove_duplicates', keywords: ['去重', '重复', '重复记录', '重复值', '重复项'] },
+    { id: 'fill_missing_values', keywords: ['缺失', '空值', '缺失值填充', '填充', '补全', '前向填充', '均值', '平均', '众数', 'mode', 'ffill'] },
+    { id: 'standardize_formats', keywords: ['格式', '标准化', '日期格式', '时间格式', '格式统一', '格式化'] },
+    { id: 'remove_outliers', keywords: ['异常', '离群', '异常值', 'outlier'] },
+    { id: 'normalize_text', keywords: ['文本标准化', '大小写', '空白', '去空格', 'trim', 'lowercase', 'uppercase', '清洗文本'] },
+  ];
+
+  const computeStrategyScores = useCallback((text: string): Record<string, number> => {
+    const t = (text || '').toLowerCase();
+    const scores: Record<string, number> = {};
+    strategyKeywordMap.forEach(({ id, keywords }) => {
+      let score = 0;
+      keywords.forEach((k) => {
+        if (t.includes(k.toLowerCase())) score += 1;
+      });
+      scores[id] = score;
+    });
+    return scores;
+  }, []);
+
+  // 初始化语音识别（Web Speech API）
+  const initSpeechRecognition = useCallback(() => {
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('当前浏览器不支持语音识别', { description: '建议使用最新的 Chrome/Edge 浏览器' });
+      setSpeechStatus('error');
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    recognition.onresult = (event: any) => {
+      const results = event.results;
+      let transcript = '';
+      for (let i = event.resultIndex; i < results.length; i++) {
+        transcript += results[i][0].transcript;
+      }
+      setSpeechText(prev => {
+        const combined = (prev + ' ' + transcript).trim();
+        return combined.length > 1000 ? combined.slice(combined.length - 1000) : combined;
+      });
+    };
+
+    recognition.onstart = () => setSpeechStatus('listening');
+    recognition.onend = () => {
+      if (isListening) {
+        try { recognition.start(); } catch {}
+      } else {
+        setSpeechStatus('idle');
+      }
+    };
+    recognition.onerror = () => setSpeechStatus('error');
+
+    recognitionRef.current = recognition;
+  }, [isListening]);
+
+  // 波形绘制
+  const drawWaveform = useCallback(() => {
+    const canvas = waveformCanvasRef.current;
+    const analyser = analyserRef.current;
+    if (!canvas || !analyser) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const width = canvas.width = canvas.clientWidth;
+    const height = canvas.height = 96;
+    analyser.fftSize = 2048;
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const render = () => {
+      analyser.getByteTimeDomainData(dataArray);
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, width, height);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#3b82f6';
+      ctx.beginPath();
+      const sliceWidth = width / bufferLength;
+      let x = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * height) / 2;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.lineTo(width, height / 2);
+      ctx.stroke();
+      animationRef.current = requestAnimationFrame(render);
+    };
+    render();
+  }, []);
+
+  // 开始语音输入
+  const startVoiceInput = useCallback(async () => {
+    if (isListening) return;
+    try {
+      setSpeechText('');
+      setSpeechStatus('processing');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyserRef.current = analyser;
+      source.connect(analyser);
+
+      initSpeechRecognition();
+      if (recognitionRef.current) {
+        try { recognitionRef.current.start(); } catch {}
+      }
+
+      setIsListening(true);
+      setSpeechStatus('listening');
+      drawWaveform();
+    } catch (err) {
+      console.error(err);
+      setSpeechStatus('error');
+      toast.error('无法启动语音输入', { description: '请检查麦克风权限设置' });
+    }
+  }, [isListening, initSpeechRecognition, drawWaveform]);
+
+  // 停止语音输入
+  const stopVoiceInput = useCallback(() => {
+    try {
+      setIsListening(false);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+        recognitionRef.current = null;
+      }
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      if (analyserRef.current) analyserRef.current.disconnect();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(t => t.stop());
+        mediaStreamRef.current = null;
+      }
+      setSpeechStatus('idle');
+    } catch {}
+  }, []);
+
+  // 对话框关闭时清理语音资源
+  useEffect(() => {
+    if (!isOpen && isListening) {
+      stopVoiceInput();
+    }
+  }, [isOpen, isListening, stopVoiceInput]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isCleaning, setIsCleaning] = useState(false);
   const [analysisComplete, setAnalysisComplete] = useState(false);
@@ -375,6 +545,27 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
     });
   };
 
+  // 根据文本指令自动勾选与排序策略
+  useEffect(() => {
+    if (currentStep !== 'strategy') return;
+    const text = speechText.trim();
+    if (!text) return;
+
+    const scores = computeStrategyScores(text);
+    // 排序：匹配分数高的在前
+    const sorted = [...strategies].sort((a, b) => (scores[b.id] || 0) - (scores[a.id] || 0));
+    setStrategies(sorted);
+
+    // 勾选：出现关键词的策略自动加入选择
+    const autoSelected = Object.keys(scores).filter((id) => (scores[id] || 0) > 0);
+    if (autoSelected.length) {
+      setSelectedStrategies((prev) => {
+        const set = new Set([...prev, ...autoSelected]);
+        return Array.from(set);
+      });
+    }
+  }, [speechText, currentStep]);
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
@@ -511,6 +702,18 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
                 </p>
               </CardHeader>
               <CardContent>
+                {/* 文本指令输入模块（替换语音输入） */}
+                <div className="space-y-3 mb-6">
+                  <Label>策略指令（文本输入）</Label>
+                  <Textarea
+                    value={speechText}
+                    onChange={(e) => setSpeechText(e.target.value)}
+                    placeholder="请让输入自然语言指令，例如对数据进行去重、缺失值填充（均值/众数/前向填充）"
+                    rows={4}
+                  />
+                  <div className="text-xs text-gray-500">输入的自然语言指令可用于筛选或排序推荐策略</div>
+                </div>
+
                 <div className="space-y-4">
                   {strategies.map((strategy) => (
                     <div key={strategy.id} className="border rounded-lg p-4">
