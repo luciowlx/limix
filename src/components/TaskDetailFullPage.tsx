@@ -1886,7 +1886,7 @@ output:
           </Button>
         </CardHeader>
         <CardContent>
-          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-w-full max-h-[520px] overflow-auto whitespace-pre break-words">
+          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-w-full max-h-[420px] md:max-h-[520px] lg:max-h-[60vh] overflow-auto whitespace-pre break-words">
             {parameterJSON}
           </pre>
         </CardContent>
@@ -1894,11 +1894,11 @@ output:
 
       {/* 产物预览弹窗 */}
       <Dialog open={artifactPreviewOpen} onOpenChange={setArtifactPreviewOpen}>
-        <DialogContent className="sm:max-w-3xl w-[95vw] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl w-[92vw] max-h-[72vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>预览：{artifactPreviewName}</DialogTitle>
           </DialogHeader>
-          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full whitespace-pre break-words">
+          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-h-[60vh] overflow-auto whitespace-pre break-words">
             {artifactPreviewContent}
           </pre>
         </DialogContent>
