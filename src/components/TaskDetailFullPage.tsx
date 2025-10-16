@@ -84,7 +84,6 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
   // 导出需要的可视化区域引用
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const causalRef = useRef<HTMLDivElement | null>(null);
-  const paramsJsonRef = useRef<HTMLDivElement | null>(null);
   // 产物预览弹窗状态
   const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
   const [artifactPreviewName, setArtifactPreviewName] = useState<string | null>(null);
@@ -549,7 +548,7 @@ output:
   ];
 
   const mockArtifacts = [
-    { name: 'training_history.json', type: 'Metrics', size: '12.5 KB', url: '#' },
+    // 移除 training_history.json（根据需求隐藏）
     { name: 'model_config.yaml', type: 'Configuration', size: '2.1 KB', url: '#' },
     { name: 'task_params.json', type: 'Parameters', size: '3.1 KB', url: '#' },
   ];
@@ -1847,8 +1846,11 @@ output:
                         onClick={() => {
                           setLoadingAction(`preview-${index}`);
                           if (artifact.name === 'task_params.json') {
-                            // 滚动至参数 JSON 预览卡片
-                            paramsJsonRef?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            // 打开参数 JSON 的预览弹窗
+                            setArtifactPreviewName(artifact.name);
+                            setArtifactPreviewType('json');
+                            setArtifactPreviewContent(parameterJSON);
+                            setArtifactPreviewOpen(true);
                           } else if (artifact.name === 'model_config.yaml') {
                             // 打开 YAML 预览弹窗
                             setArtifactPreviewName(artifact.name);
@@ -1874,23 +1876,7 @@ output:
           </Table>
         </CardContent>
       </Card>
-      {/* 参数 JSON 回显（移动至“任务产物”区集中展示） */}
-      <Card ref={paramsJsonRef} className="transition-all duration-200 hover:shadow-md border-gray-200">
-        <CardHeader className="flex-row items-center justify-between">
-          <div>
-            <CardTitle>参数 JSON 回显</CardTitle>
-            <CardDescription>用于复盘与核对，支持直接导出 JSON 文件</CardDescription>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleExportParamsJson}>
-            <Download className="h-4 w-4 mr-2" /> 导出 JSON
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-w-full max-h-[420px] md:max-h-[520px] lg:max-h-[60vh] overflow-auto whitespace-pre break-words">
-            {parameterJSON}
-          </pre>
-        </CardContent>
-      </Card>
+      {/* 参数 JSON 回显卡片按需求移除 */}
 
       {/* 产物预览弹窗 */}
       <Dialog open={artifactPreviewOpen} onOpenChange={setArtifactPreviewOpen}>
