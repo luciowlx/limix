@@ -17,8 +17,10 @@ import {
   User,
   Plus,
   UserPlus,
-  Settings2
+  Settings2,
+  ListChecks
 } from "lucide-react";
+import TaskTypeManagement from "./TaskTypeManagement";
 
 interface SystemManagementProps {
   defaultSubTab?: string;
@@ -52,6 +54,12 @@ export function SystemManagement({ defaultSubTab = "overview" }: SystemManagemen
       icon: Settings2,
       description: "业务字段配置管理"
     },
+    {
+      id: "tasktype",
+      name: "任务类型管理",
+      icon: ListChecks,
+      description: "基于 JSON 的任务类型配置（管理员）"
+    },
     { 
       id: "personal", 
       name: "个人中心", 
@@ -72,6 +80,10 @@ export function SystemManagement({ defaultSubTab = "overview" }: SystemManagemen
     <ConfigurationManagement />
   );
 
+  const renderTaskTypeManagement = () => (
+    <TaskTypeManagement isAdmin={true} />
+  );
+
   const renderPersonalCenter = () => (
     <PersonalCenter />
   );
@@ -84,6 +96,8 @@ export function SystemManagement({ defaultSubTab = "overview" }: SystemManagemen
         return renderRoleManagement();
       case "config":
         return renderConfigurationManagement();
+      case "tasktype":
+        return renderTaskTypeManagement();
       case "personal":
         return renderPersonalCenter();
       case "overview":

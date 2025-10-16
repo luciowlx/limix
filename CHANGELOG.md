@@ -23,6 +23,53 @@
 ## 变更历史
 
 ### 2025-10-16
+- [Feature/UI] 预处理执行入口与二次确认弹窗优化：
+  - 将“应用处理”按钮改为“开始执行数据处理”，并使用播放图标（Play）以符合原型视觉；加载态文案为“处理中...”。
+  - 二次确认弹窗（action='apply'）新增：当前所选数据集名称、醒目提示块（黑底蓝字）与“确认开始”按钮文案；说明“此操作不会修改原始数据”。
+  - 涉及文件：
+    - src/components/DataPreprocessing.tsx（按钮文案与图标、确认弹窗内容与样式；复用 handleApply/handleConfirm）
+  - 验证：`npm run dev` 后在 http://localhost:3000/ 进入“数据管理 -> 数据预处理 -> 规则 JSON”页签，查看底部主按钮与确认弹窗效果。
+
+- [Build/Deploy] 部署准备：新增 Vercel 配置并完成本地构建
+  - 新增 vercel.json，指定输出目录为 build，并通过 rewrites 实现 SPA 路由回退（避免影响静态资源请求）。
+  - 运行 `npm run build` 成功生成构建产物到 build/ 目录。
+
+- [Chore/Repo] 忽略构建产物与系统文件
+  - 更新 .gitignore：添加 build/、dist/、.vercel/ 与 .DS_Store，避免将构建产物与本地文件提交到仓库。
+
+- [Docs] 更新日志，记录上述 UI、构建与仓库配置变更。
+
+### 2025-10-16
+- [Fix/AI] 修复“智能助手”在 FullPageView 中打开后崩溃的问题：
+  - 现象：点击右上角“智能助手”按钮，页面报错并提示在 `<GlobalAIAssistant>` 组件中发生错误。
+  - 原因排查：
+    - 组件在挂载阶段使用了 `useXAgent/useXChat` 钩子并传入空配置，可能触发运行时校验导致异常；
+    - 同时使用了 `antd` 的 `Flex` 组件，在某些版本下存在运行时不兼容风险，可能造成 “Element type is invalid” 类错误。
+  - 修复措施：
+    - 移除 `useXAgent/useXChat`，改为本地 `useState` 管理消息与加载态，仅模拟回复，不依赖后端；
+    - 将 `Flex` 替换为 `div + CSS（display:flex; gap）`，移除对 `antd/Flex` 的运行时依赖；
+    - 在 `src/components/FullPageView.tsx` 的 `ai-assistant` 场景中引入 `ErrorBoundary` 包裹助手组件，避免异常扩散；
+    - 通过 `onClose` 将 FullPageView 的关闭逻辑传递给 `GlobalAIAssistant`，启用悬浮关闭按钮。
+  - 涉及文件：
+    - src/components/GlobalAIAssistant.tsx（移除 useXAgent/useXChat；替换 Flex；本地消息状态；保留前端原型逻辑）
+    - src/components/ErrorBoundary.tsx（新增：错误边界）
+    - src/components/FullPageView.tsx（为 ai-assistant 引入错误边界并传递 onClose）
+  - 验证：
+    - 运行 `npm run dev`，在 http://localhost:3000/ 点击“智能助手”按钮可正常打开；输入消息获得模拟回复；悬浮关闭按钮与顶部返回/关闭均可正常关闭；控制台不再出现崩溃日志。
+
+### 2025-10-16
+- [Feature/AI/UI] 合并智能助手入口为单一入口，并将 AI Copilot 改为纯前端原型（使用模拟数据与本地回复），随后统一到 FullPageView（type='ai-assistant'）：
+  - 变更点：
+    - src/components/Header.tsx：移除旧的“Bot”图标与 onOpenBot 入口，仅保留右上角“智能助手”按钮（MessageCircle）。
+    - src/App.tsx：移除 GlobalBot 引用与直接渲染；改为通过 FullPageView 统一打开助手（type='ai-assistant'），删除 isAIAssistantOpen 状态。
+    - src/components/GlobalAIAssistant.tsx：去除真实网络请求逻辑，保留 Ant Design X 结构；新增本地模拟回复（按主题生成演示文案）、加载状态与取消机制；保留会话管理、提示词、附件占位与气泡列表等。
+    - src/components/FullPageView.tsx：新增 'ai-assistant' 类型并渲染 GlobalAIAssistant，替换旧的 'global-bot'。
+  - 说明/验证：
+    - 通过 `npm run dev` 启动 Vite，本地预览 http://localhost:3000/。
+    - 点击右上角“智能助手”打开 FullPageView -> 智能助手；输入内容会在 0.8s 后生成模拟回复；可点击“取消”中止当前模拟回复；提示卡片与多会话切换正常。
+  - 参考原型：https://ant-design-x.antgroup.com/docs/playground/copilot-cn
+
+### 2025-10-16
 - [Fix/Chart] 修复“任务结果”区图表不显示问题：为 ChartContainer 增加尺寸检测与数值回退，避免父容器宽/高为 0 时 Recharts 无法渲染；当检测到 0 尺寸时以 640×240 作为回退尺寸渲染；正常情况下仍维持 width/height 为 100% 的响应式。
   - 涉及文件：
     - src/components/ui/chart.tsx（新增 ResizeObserver 尺寸测量；在 ResponsiveContainer 上增加数值回退逻辑；保留 w-full 与 min-h-[220px]）

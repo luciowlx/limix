@@ -3,10 +3,11 @@ import { Button } from "./ui/button";
 import { PersonalCenter } from "./PersonalCenter";
 import { PersonalizationSettings } from "./PersonalizationSettings";
 import { NotificationCenterContent } from "./NotificationCenterContent";
-import { GlobalBotContent } from "./GlobalBotContent";
+import GlobalAIAssistant from "./GlobalAIAssistant";
+import ErrorBoundary from "./ErrorBoundary";
 
 interface FullPageViewProps {
-  type: 'personal-center' | 'personalization-settings' | 'notification-center' | 'global-bot' | null;
+  type: 'personal-center' | 'personalization-settings' | 'notification-center' | 'ai-assistant' | null;
   onClose: () => void;
 }
 
@@ -21,7 +22,7 @@ export function FullPageView({ type, onClose }: FullPageViewProps) {
         return '个性化设置';
       case 'notification-center':
         return '通知中心';
-      case 'global-bot':
+      case 'ai-assistant':
         return '智能助手';
       default:
         return '';
@@ -36,8 +37,14 @@ export function FullPageView({ type, onClose }: FullPageViewProps) {
         return <PersonalizationSettings onBack={onClose} />;
       case 'notification-center':
         return <NotificationCenterContent />;
-      case 'global-bot':
-        return <GlobalBotContent />;
+      case 'ai-assistant':
+        // 采用统一的 AI Copilot 组件（前端原型，模拟数据），在全屏容器内部渲染
+        // 使用错误边界包裹，确保异常时不会影响整个应用
+        return (
+          <ErrorBoundary>
+            <GlobalAIAssistant onClose={onClose} />
+          </ErrorBoundary>
+        );
       default:
         return null;
     }

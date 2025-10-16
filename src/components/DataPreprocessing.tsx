@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -61,14 +61,38 @@ interface FieldInfo {
   selected: boolean;
 }
 
-interface CleaningRule {
+ interface CleaningRule {
   id: string;
   field: string;
-  type: 'remove_null' | 'fill_null' | 'remove_duplicates' | 'format_date' | 'normalize_text' | 'validate_range' | 'custom';
+  type: 'remove_null' | 'fill_null' | 'remove_duplicates' | 'format_date' | 'normalize_text' | 'validate_range' | 'resample' | 'custom';
   config: any;
   enabled: boolean;
   description: string;
-}
+   // 来源：推荐策略 or 自定义
+   source?: 'recommended' | 'custom';
+   // 若来源为推荐策略，记录推荐策略id，便于同步取消/启用
+   refId?: string;
+ }
+
+ interface RecommendedStrategy {
+   id: string;
+   // 关键能力标识：用于 UI 图标与映射
+   key: 'deduplicate' | 'fill_missing' | 'unique_check' | 'normalize_text';
+   title: string;
+   description: string;
+   confidence: number; // 0~1
+   impactLevel: '高' | '中' | '低';
+   affectedRows: number;
+   affectedFields: string[];
+   estimatedTimeMinutes?: number;
+   rule: {
+     field: string;
+     type: CleaningRule['type'];
+     config: any;
+     description: string;
+   };
+   selected: boolean;
+ }
 
 interface ProcessingResult {
   originalRows: number;
@@ -87,7 +111,7 @@ interface ProcessingResult {
   }>;
 }
 
-export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditional' }: DataPreprocessingProps) {
+  export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditional' }: DataPreprocessingProps) {
   const [currentMode, setCurrentMode] = useState<'traditional' | 'solo'>(mode);
   // 初始不加载字段信息，先进行“选择数据集”步骤
   const [isLoading, setIsLoading] = useState(false);
@@ -100,6 +124,9 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [jsonConfig, setJsonConfig] = useState('');
   const [showJsonEditor, setShowJsonEditor] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [recommendedStrategies, setRecommendedStrategies] = useState<RecommendedStrategy[]>([]);
+  const [recommendedQuery, setRecommendedQuery] = useState('');
 
   // 数据集选择相关状态（mock 数据集列表）
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | undefined>(datasetId);
@@ -201,45 +228,82 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       
       setFields(mockFields);
       
-      // 生成默认清洗规则
-      const defaultRules: CleaningRule[] = [
+      // 基于字段统计模拟生成 AI 推荐清洗策略（智能推荐清洗策略模块）
+      const recommended: RecommendedStrategy[] = [
         {
-          id: 'rule-1',
-          field: 'name',
-          type: 'remove_null',
-          config: {},
-          enabled: true,
-          description: '移除姓名字段的空值记录'
+          id: 'rs-1',
+          key: 'deduplicate',
+          title: '数据去重',
+          description: '检测到重复记录，建议进行去重以提高数据质量',
+          confidence: 0.95,
+          impactLevel: '中',
+          affectedRows: 3247,
+          affectedFields: ['user_id', 'timestamp', 'action'],
+          estimatedTimeMinutes: 2,
+          // 映射到规则：remove_duplicates
+          rule: { field: 'id', type: 'remove_duplicates', config: {}, description: '移除重复记录' },
+          selected: true
         },
         {
-          id: 'rule-2',
-          field: 'email',
-          type: 'fill_null',
-          config: { fillValue: 'unknown@example.com' },
-          enabled: false,
-          description: '用默认值填充邮箱空值'
+          id: 'rs-2',
+          key: 'fill_missing',
+          title: '缺失值填充',
+          description: '使用智能算法填充 age 和 location 字段的缺失值',
+          confidence: 0.88,
+          impactLevel: '高',
+          affectedRows: 8934,
+          affectedFields: ['age', 'location'],
+          estimatedTimeMinutes: 5,
+          rule: { field: 'email', type: 'fill_null', config: { fillValue: 'unknown@example.com' }, description: '用默认值填充邮箱空值' },
+          selected: false
         },
         {
-          id: 'rule-3',
-          field: 'age',
-          type: 'validate_range',
-          config: { min: 0, max: 120 },
-          enabled: true,
-          description: '验证年龄范围（0-120）'
+          id: 'rs-3',
+          key: 'unique_check',
+          title: '唯一值检测',
+          description: '检测并处理关键字段中的唯一性问题',
+          confidence: 0.76,
+          impactLevel: '低',
+          affectedRows: 234,
+          affectedFields: ['purchase_amount'],
+          estimatedTimeMinutes: 4,
+          // 使用 remove_duplicates 作为唯一性问题处理的规则映射
+          rule: { field: 'id', type: 'remove_duplicates', config: {}, description: '唯一值检测/去重' },
+          selected: false
         },
         {
-          id: 'rule-4',
-          field: 'created_at',
-          type: 'format_date',
-          config: { format: 'YYYY-MM-DD' },
-          enabled: true,
-          description: '统一日期格式'
+          id: 'rs-4',
+          key: 'normalize_text',
+          title: '文本标准化',
+          description: '统一文本字段的大小写和编码格式',
+          confidence: 0.85,
+          impactLevel: '中',
+          affectedRows: 45678,
+          affectedFields: ['name', 'address', 'category'],
+          estimatedTimeMinutes: 6,
+          rule: { field: 'name', type: 'normalize_text', config: {}, description: '统一文本大小写与编码' },
+          selected: true
         }
       ];
-      
+      setRecommendedStrategies(recommended);
+
+      // 将已勾选的推荐策略同步到清洗规则区域
+      const defaultRules: CleaningRule[] = recommended
+        .filter(r => r.selected)
+        .map((r, idx) => ({
+          id: `rule-${idx + 1}`,
+          field: r.rule.field,
+          type: r.rule.type,
+          config: r.rule.config,
+          enabled: true,
+          description: r.rule.description,
+          source: 'recommended',
+          refId: r.id
+        }));
+
       setCleaningRules(defaultRules);
       
-      // 生成JSON配置
+      // 生成JSON配置（与界面互操作：只输出必要字段）
       const jsonConfigTemplate = {
         fields: mockFields.filter(f => f.selected).map(f => f.name),
         rules: defaultRules.filter(r => r.enabled).map(r => ({
@@ -258,7 +322,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
           maxErrors: 100
         }
       };
-      
+
       setJsonConfig(JSON.stringify(jsonConfigTemplate, null, 2));
       
     } catch (error) {
@@ -284,6 +348,33 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
     ));
   };
 
+  // 字段名修改（在表格中可编辑）
+  const handleFieldNameChange = (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    setFields(prev => {
+      // 校验空值
+      if (!trimmed) {
+        toast.error('字段名不能为空');
+        return prev;
+      }
+      // 校验重复（允许保持原名）
+      const exists = prev.some(f => f.name === trimmed && trimmed !== oldName);
+      if (exists) {
+        toast.error('字段名重复，请使用唯一名称');
+        return prev;
+      }
+      const next = prev.map(f => (f.name === oldName ? { ...f, name: trimmed } : f));
+      // 同步更新清洗规则里引用的字段名
+      setCleaningRules(rules => rules.map(r => (r.field === oldName ? { ...r, field: trimmed } : r)));
+      return next;
+    });
+  };
+
+  // 字段类型修改（下拉选择）
+  const handleFieldTypeChange = (fieldName: string, newType: FieldInfo['type']) => {
+    setFields(prev => prev.map(f => (f.name === fieldName ? { ...f, type: newType } : f)));
+  };
+
   // 添加清洗规则
   const addCleaningRule = () => {
     const newRule: CleaningRule = {
@@ -299,7 +390,14 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
   // 删除清洗规则
   const removeCleaningRule = (ruleId: string) => {
-    setCleaningRules(prev => prev.filter(rule => rule.id !== ruleId));
+    // 若删除的是推荐策略生成的规则，同时同步取消推荐策略勾选
+    setCleaningRules(prev => {
+      const rule = prev.find(r => r.id === ruleId);
+      if (rule?.source === 'recommended' && rule.refId) {
+        setRecommendedStrategies(list => list.map(s => s.id === rule.refId ? { ...s, selected: false } : s));
+      }
+      return prev.filter(r => r.id !== ruleId);
+    });
   };
 
   // 更新清洗规则
@@ -432,9 +530,34 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
           selected: config.fields?.includes(field.name) || false
         })));
         
-        // 更新清洗规则
+        // 更新清洗规则（生成完整结构，来源默认为 custom；若与推荐策略匹配则标记为 recommended 并自动勾选推荐项）
         if (config.rules) {
-          setCleaningRules(config.rules);
+          const imported: CleaningRule[] = (config.rules as Array<any>).map((r: any, idx: number) => ({
+            id: `rule-import-${Date.now()}-${idx}`,
+            field: r.field,
+            type: r.type,
+            config: r.config ?? {},
+            enabled: true,
+            description: r.description ?? `${r.type} - ${r.field}`,
+            source: 'custom'
+          }));
+
+          // 与推荐策略互操作：匹配并同步选择状态
+          setRecommendedStrategies(prev => {
+            let next = [...prev];
+            imported.forEach(rule => {
+              const matched = next.find(s => s.rule.field === rule.field && s.rule.type === rule.type);
+              if (matched) {
+                // 勾选推荐策略，并将规则标记来源信息
+                matched.selected = true;
+                rule.source = 'recommended';
+                rule.refId = matched.id;
+              }
+            });
+            return next;
+          });
+
+          setCleaningRules(imported);
         }
         
         toast.success('配置已导入');
@@ -443,6 +566,114 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       }
     };
     reader.readAsText(file);
+  };
+
+  // 将当前界面配置同步到 JSON 文本
+  const syncUIToJson = () => {
+    try {
+      const config = {
+        fields: fields.filter(f => f.selected).map(f => f.name),
+        rules: cleaningRules.filter(r => r.enabled).map(r => ({
+          field: r.field,
+          type: r.type,
+          config: r.config,
+          description: r.description
+        }))
+      };
+      setJsonConfig(JSON.stringify(config, null, 2));
+      toast.success('已同步界面配置到 JSON');
+    } catch (err) {
+      toast.error('同步失败');
+    }
+  };
+
+  // 应用 JSON 到界面（无需文件导入，直接使用下方文本框内容）
+  const applyJsonToUI = () => {
+    try {
+      const config = JSON.parse(jsonConfig);
+      // 字段
+      setFields(prev => prev.map(field => ({
+        ...field,
+        selected: config.fields?.includes(field.name) || false
+      })));
+      // 规则（与导入逻辑一致）
+      if (config.rules) {
+        const imported: CleaningRule[] = (config.rules as Array<any>).map((r: any, idx: number) => ({
+          id: `rule-json-${Date.now()}-${idx}`,
+          field: r.field,
+          type: r.type,
+          config: r.config ?? {},
+          enabled: true,
+          description: r.description ?? `${r.type} - ${r.field}`,
+          source: 'custom'
+        }));
+
+        setRecommendedStrategies(prev => {
+          let next = [...prev];
+          imported.forEach(rule => {
+            const matched = next.find(s => s.rule.field === rule.field && s.rule.type === rule.type);
+            if (matched) {
+              matched.selected = true;
+              rule.source = 'recommended';
+              rule.refId = matched.id;
+            }
+          });
+          return next;
+        });
+
+        setCleaningRules(imported);
+      }
+      toast.success('已应用 JSON 到界面配置');
+    } catch (error) {
+      toast.error('JSON 内容解析失败');
+    }
+  };
+
+  // 勾选/取消勾选推荐策略 -> 同步到清洗规则区域
+  const toggleRecommendedStrategy = (id: string, selected: boolean) => {
+    setRecommendedStrategies(prev => {
+      const strategy = prev.find(s => s.id === id);
+      const next = prev.map(s => s.id === id ? { ...s, selected } : s);
+      if (strategy) {
+        if (selected) {
+          setCleaningRules(prevRules => {
+            // 若已存在，直接启用
+            const exist = prevRules.find(r => r.refId === id);
+            if (exist) {
+              return prevRules.map(r => r.refId === id ? { ...r, enabled: true } : r);
+            }
+            const newRule: CleaningRule = {
+              id: `rule-${Date.now()}`,
+              field: strategy.rule.field,
+              type: strategy.rule.type,
+              config: strategy.rule.config,
+              description: strategy.rule.description,
+              enabled: true,
+              source: 'recommended',
+              refId: strategy.id
+            };
+            return [...prevRules, newRule];
+          });
+        } else {
+          setCleaningRules(prevRules => prevRules.filter(r => r.refId !== id));
+        }
+      }
+      return next;
+    });
+  };
+
+  // 影响等级样式
+  const impactLevelClass = (level: '高' | '中' | '低') => {
+    switch (level) {
+      case '高':
+        return 'bg-red-100 text-red-700';
+      case '中':
+        return 'bg-yellow-100 text-yellow-700';
+      case '低':
+        return 'bg-green-100 text-green-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
+    }
   };
 
   // 获取规则类型的显示名称
@@ -454,6 +685,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       'format_date': '格式化日期',
       'normalize_text': '文本标准化',
       'validate_range': '范围验证',
+      'resample': '重采样',
       'custom': '自定义规则'
     };
     return typeNames[type] || type;
@@ -478,24 +710,6 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>数据预处理 - {currentMode === 'traditional' ? '传统模式' : 'Solo模式'}</span>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant={currentMode === 'traditional' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setCurrentMode('traditional')}
-              >
-                <Settings className="h-4 w-4 mr-1" />
-                传统模式
-              </Button>
-              <Button
-                variant={currentMode === 'solo' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setCurrentMode('solo')}
-              >
-                <Wand2 className="h-4 w-4 mr-1" />
-                Solo模式
-              </Button>
-            </div>
           </DialogTitle>
           <DialogDescription>
             {currentMode === 'traditional' 
@@ -523,8 +737,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
               {[
                 { step: 0, title: '选择数据集', icon: Database },
                 { step: 1, title: '字段选择', icon: Layers },
-                { step: 2, title: '规则配置', icon: Settings },
-                { step: 3, title: '预览结果', icon: Eye }
+                { step: 2, title: '规则配置', icon: Settings }
               ].map(({ step, title, icon: Icon }) => (
                 <div key={step} className="flex items-center">
                   <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
@@ -543,7 +756,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                   }`}>
                     {title}
                   </span>
-                  {step < 3 && (
+                  {step < 2 && (
                     <div className={`w-12 h-0.5 mx-4 ${
                       currentStep > step ? 'bg-blue-500' : 'bg-gray-300'
                     }`} />
@@ -554,11 +767,10 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
             {currentMode === 'traditional' ? (
               <Tabs value={currentStep.toString()} onValueChange={(value) => setCurrentStep(parseInt(value))}>
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="0">选择数据集</TabsTrigger>
                   <TabsTrigger value="1">字段选择</TabsTrigger>
                   <TabsTrigger value="2">规则配置</TabsTrigger>
-                  <TabsTrigger value="3">预览结果</TabsTrigger>
                 </TabsList>
 
                 {/* 选择数据集（Step 0）*/}
@@ -644,11 +856,27 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                   }
                                 />
                               </TableCell>
-                              <TableCell className="font-medium">{field.name}</TableCell>
+                              <TableCell className="font-medium">
+                                <Input
+                                  defaultValue={field.name}
+                                  onBlur={(e) => handleFieldNameChange(field.name, e.target.value)}
+                                  className="h-8"
+                                />
+                              </TableCell>
                               <TableCell>
-                                <Badge className={getFieldTypeColor(field.type)}>
-                                  {field.type}
-                                </Badge>
+                                <Select value={field.type} onValueChange={(v) => handleFieldTypeChange(field.name, v as FieldInfo['type'])}>
+                                  <SelectTrigger className={`h-8 ${getFieldTypeColor(field.type)}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="string">string</SelectItem>
+                                    <SelectItem value="number">number</SelectItem>
+                                    <SelectItem value="boolean">boolean</SelectItem>
+                                    <SelectItem value="date">date</SelectItem>
+                                    <SelectItem value="object">object</SelectItem>
+                                    <SelectItem value="array">array</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center space-x-2">
@@ -696,7 +924,70 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                 {/* 规则配置 */}
                 <TabsContent value="2" className="space-y-4">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* 可视化规则配置 */}
+                    {/* 智能推荐清洗策略（左侧） */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <Wand2 className="h-5 w-5" />
+                            <span>智能推荐清洗策略</span>
+                            <Badge variant="secondary">基于AI分析</Badge>
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* 文本指令输入，用于筛选/排序推荐策略 */}
+                        <div>
+                          <Label className="mb-1 block">策略指令（文本输入）</Label>
+                          <Input
+                            value={recommendedQuery}
+                            onChange={(e) => setRecommendedQuery(e.target.value)}
+                            placeholder="请输入自然语言指令，例如：去重、缺失值填充（均值/众数/前向填充）等"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">输入的自然语言指令可用于筛选或排序推荐策略</p>
+                        </div>
+                        <div className="space-y-3">
+                          {(recommendedStrategies.filter(s => {
+                            const q = recommendedQuery.trim().toLowerCase();
+                            if (!q) return true;
+                            const text = `${s.title} ${s.description} ${s.affectedFields.join(', ')}`.toLowerCase();
+                            return text.includes(q);
+                          })).map((s) => (
+                            <div key={s.id} className="border rounded-md p-4 bg-white">
+                              <div className="flex items-start">
+                                <Checkbox
+                                  checked={!!s.selected}
+                                  onCheckedChange={(checked) => toggleRecommendedStrategy(s.id, !!checked)}
+                                  className="mr-3 mt-1"
+                                />
+                                <div className="flex-1">
+                                  {/* 标题与标签 */}
+                                  <div className="flex items-center flex-wrap gap-2">
+                                    <FileText className="h-4 w-4 text-gray-600" />
+                                    <span className="font-medium">{s.title}</span>
+                                    <span className={`px-2 py-0.5 rounded text-xs ${impactLevelClass(s.impactLevel)}`}>{s.impactLevel}影响</span>
+                                    <Badge variant="outline">置信度：{Math.round(s.confidence * 100)}%</Badge>
+                                  </div>
+                                  {/* 指标行 */}
+                                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm text-gray-700">
+                                    <div>预计时间：{s.estimatedTimeMinutes ?? 3} 分钟</div>
+                                    <div>影响行数：{s.affectedRows.toLocaleString()}</div>
+                                    <div>影响字段：{s.affectedFields.join(', ')}</div>
+                                  </div>
+                                  {/* 说明 */}
+                                  <p className="mt-2 text-sm text-gray-600">{s.description}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {recommendedStrategies.length === 0 && (
+                            <div className="text-sm text-gray-500">暂无推荐策略</div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* 清洗规则管理（右侧，统一展示推荐与自定义） */}
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center justify-between">
@@ -714,14 +1005,18 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                         {cleaningRules.map((rule) => (
                           <Card key={rule.id} className="p-4">
                             <div className="space-y-3">
-                              <div className="flex items-center justify-end">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => removeCleaningRule(rule.id)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                              <div className="flex items-center justify-between">
+                                <Badge variant={rule.source === 'recommended' ? 'default' : 'secondary'}>
+                                  {rule.source === 'recommended' ? '推荐策略' : '自定义'}</Badge>
+                                <div>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => removeCleaningRule(rule.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
                               
                               <div className="grid grid-cols-2 gap-3">
@@ -750,9 +1045,19 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                   <Label>规则类型</Label>
                                   <Select
                                     value={rule.type}
-                                    onValueChange={(type) => 
-                                      updateCleaningRule(rule.id, { type: type as any })
-                                    }
+                                    onValueChange={(type) => {
+                                      const t = type as CleaningRule['type'];
+                                      if (t === 'resample') {
+                                        const nextCfg = {
+                                          mode: (rule.config?.mode as 'mode' | 'median' | 'custom') || 'mode',
+                                          interval: typeof rule.config?.interval === 'number' ? rule.config.interval : 1,
+                                          unit: (rule.config?.unit as 'days' | 'hours' | 'minutes' | 'seconds') || 'seconds'
+                                        };
+                                        updateCleaningRule(rule.id, { type: t, config: nextCfg });
+                                      } else {
+                                        updateCleaningRule(rule.id, { type: t });
+                                      }
+                                    }}
                                   >
                                     <SelectTrigger>
                                       <SelectValue />
@@ -764,6 +1069,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                       <SelectItem value="format_date">格式化日期</SelectItem>
                                       <SelectItem value="normalize_text">文本标准化</SelectItem>
                                       <SelectItem value="validate_range">范围验证</SelectItem>
+                                      <SelectItem value="resample">重采样</SelectItem>
                                       <SelectItem value="custom">自定义规则</SelectItem>
                                     </SelectContent>
                                   </Select>
@@ -838,6 +1144,75 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                   </Select>
                                 </div>
                               )}
+
+                              {rule.type === 'resample' && (
+                                <div className="space-y-3">
+                                  <div>
+                                    <Label>采样时间差模式</Label>
+                                    <Select
+                                      value={rule.config?.mode || 'mode'}
+                                      onValueChange={(mode) =>
+                                        updateCleaningRule(rule.id, {
+                                          config: { ...rule.config, mode }
+                                        })
+                                      }
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="mode">众数模式</SelectItem>
+                                        <SelectItem value="median">中位数模式</SelectItem>
+                                        <SelectItem value="custom">自定义值模式</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  {((rule.config?.mode || 'mode') === 'custom') && (
+                                    <div>
+                                      <Label>采样时间差</Label>
+                                      <div className="grid grid-cols-2 gap-3 items-center">
+                                        <div>
+                                          <Input
+                                            type="number"
+                                            value={typeof rule.config?.interval === 'number' ? rule.config.interval : ''}
+                                            onChange={(e) =>
+                                              updateCleaningRule(rule.id, {
+                                                config: { ...rule.config, interval: Number(e.target.value) }
+                                              })
+                                            }
+                                            placeholder={`采样间隔（${(() => {
+                                              const unitMap: Record<string,string> = { days: '天', hours: '小时', minutes: '分钟', seconds: '秒' };
+                                              const u = (rule.config?.unit || 'seconds') as string;
+                                              return unitMap[u] || '秒';
+                                            })()}）`}
+                                          />
+                                        </div>
+                                        <div>
+                                          <Select
+                                            value={rule.config?.unit || 'seconds'}
+                                            onValueChange={(unit) =>
+                                              updateCleaningRule(rule.id, {
+                                                config: { ...rule.config, unit }
+                                              })
+                                            }
+                                          >
+                                            <SelectTrigger>
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="days">天</SelectItem>
+                                              <SelectItem value="hours">小时</SelectItem>
+                                              <SelectItem value="minutes">分钟</SelectItem>
+                                              <SelectItem value="seconds">秒</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               
                               <div>
                                 <Label>描述</Label>
@@ -862,63 +1237,99 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                         )}
                       </CardContent>
                     </Card>
+                  </div>
 
-                    {/* JSON高级配置 */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center space-x-2">
+                  {/* JSON高级配置（底部整行，提供导入/导出与互操作） */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
                           <Code className="h-5 w-5" />
                           <span>JSON高级配置</span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-3">
-                          <Label>配置JSON</Label>
-                          <Textarea
-                            value={jsonConfig}
-                            onChange={(e) => setJsonConfig(e.target.value)}
-                            className="font-mono text-sm h-96"
-                            placeholder="输入JSON配置..."
-                          />
-                          <div className="flex space-x-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                try {
-                                  const formatted = JSON.stringify(JSON.parse(jsonConfig), null, 2);
-                                  setJsonConfig(formatted);
-                                  toast.success('JSON格式化完成');
-                                } catch (error) {
-                                  toast.error('JSON格式错误');
-                                }
-                              }}
-                            >
-                              格式化
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                navigator.clipboard.writeText(jsonConfig);
-                                toast.success('已复制到剪贴板');
-                              }}
-                            >
-                              <Copy className="h-4 w-4 mr-1" />
-                              复制
-                            </Button>
-                          </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  </div>
+                        <div className="flex items-center space-x-2">
+                          <Button variant="outline" size="sm" onClick={syncUIToJson}>
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            同步界面到JSON
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={applyJsonToUI}>
+                            <Play className="h-4 w-4 mr-1" />
+                            应用JSON至界面
+                          </Button>
+                        </div>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <Label>配置JSON</Label>
+                        <Textarea
+                          value={jsonConfig}
+                          onChange={(e) => setJsonConfig(e.target.value)}
+                          className="font-mono text-sm h-96"
+                          placeholder="输入JSON配置..."
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              try {
+                                const formatted = JSON.stringify(JSON.parse(jsonConfig), null, 2);
+                                setJsonConfig(formatted);
+                                toast.success('JSON格式化完成');
+                              } catch (error) {
+                                toast.error('JSON格式错误');
+                              }
+                            }}
+                          >
+                            格式化
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              navigator.clipboard.writeText(jsonConfig);
+                              toast.success('已复制到剪贴板');
+                            }}
+                          >
+                            <Copy className="h-4 w-4 mr-1" />
+                            复制
+                          </Button>
+                          {/* 隐藏原生文件输入，改为按钮触发 */}
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="application/json"
+                            onChange={handleImportConfig}
+                            className="hidden"
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <Upload className="h-4 w-4 mr-1" />
+                            导入JSON文件
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleExportConfig}
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            导出JSON配置
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
                   <div className="flex justify-between">
                     <Button variant="outline" onClick={() => setCurrentStep(1)}>
                       上一步
                     </Button>
                     <Button 
-                      onClick={handlePreview}
+                      onClick={handleApply}
                       disabled={isProcessing || cleaningRules.filter(r => r.enabled).length === 0}
                     >
                       {isProcessing ? (
@@ -929,241 +1340,13 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                       ) : (
                         <>
                           <Play className="h-4 w-4 mr-2" />
-                          预览结果
+                          开始执行数据处理
                         </>
                       )}
                     </Button>
                   </div>
                 </TabsContent>
-
-                {/* 预览结果 */}
-                <TabsContent value="3" className="space-y-4">
-                  {processingResult ? (
-                    <>
-                      {/* 处理统计 */}
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="flex items-center space-x-2">
-                              <FileText className="h-5 w-5 text-blue-500" />
-                              <div>
-                                <p className="text-sm text-gray-600">原始记录</p>
-                                <p className="text-2xl font-bold">{processingResult.originalRows.toLocaleString()}</p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                        
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="flex items-center space-x-2">
-                              <CheckCircle className="h-5 w-5 text-green-500" />
-                              <div>
-                                <p className="text-sm text-gray-600">处理后记录</p>
-                                <p className="text-2xl font-bold">{processingResult.processedRows.toLocaleString()}</p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                        
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="flex items-center space-x-2">
-                              <Trash2 className="h-5 w-5 text-red-500" />
-                              <div>
-                                <p className="text-sm text-gray-600">移除记录</p>
-                                <p className="text-2xl font-bold">{processingResult.removedRows.toLocaleString()}</p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                        
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="flex items-center space-x-2">
-                              <BarChart3 className="h-5 w-5 text-purple-500" />
-                              <div>
-                                <p className="text-sm text-gray-600">保留率</p>
-                                <p className="text-2xl font-bold">
-                                  {Math.round((processingResult.processedRows / processingResult.originalRows) * 100)}%
-                                </p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </div>
-
-                      {/* 错误和警告 */}
-                      {(processingResult.errors.length > 0 || processingResult.warnings.length > 0) && (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                          {processingResult.errors.length > 0 && (
-                            <Card>
-                              <CardHeader>
-                                <CardTitle className="flex items-center space-x-2 text-red-600">
-                                  <AlertCircle className="h-5 w-5" />
-                                  <span>错误信息</span>
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <div className="space-y-2">
-                                  {processingResult.errors.map((error, index) => (
-                                    <div key={index} className="flex justify-between items-center p-2 bg-red-50 rounded">
-                                      <div>
-                                        <p className="font-medium">{error.field}</p>
-                                        <p className="text-sm text-gray-600">{error.message}</p>
-                                      </div>
-                                      <Badge variant="destructive">{error.count}</Badge>
-                                    </div>
-                                  ))}
-                                </div>
-                              </CardContent>
-                            </Card>
-                          )}
-                          
-                          {processingResult.warnings.length > 0 && (
-                            <Card>
-                              <CardHeader>
-                                <CardTitle className="flex items-center space-x-2 text-yellow-600">
-                                  <AlertTriangle className="h-5 w-5" />
-                                  <span>警告信息</span>
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <div className="space-y-2">
-                                  {processingResult.warnings.map((warning, index) => (
-                                    <div key={index} className="flex justify-between items-center p-2 bg-yellow-50 rounded">
-                                      <div>
-                                        <p className="font-medium">{warning.field}</p>
-                                        <p className="text-sm text-gray-600">{warning.message}</p>
-                                      </div>
-                                      <Badge variant="secondary">{warning.count}</Badge>
-                                    </div>
-                                  ))}
-                                </div>
-                              </CardContent>
-                            </Card>
-                          )}
-                        </div>
-                      )}
-
-                      {/* 预览数据 */}
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>数据预览</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                {Object.keys(previewData[0] || {}).map(key => (
-                                  <TableHead key={key}>{key}</TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {previewData.map((row, index) => (
-                                <TableRow key={index}>
-                                  {Object.values(row).map((value, cellIndex) => (
-                                    <TableCell key={cellIndex}>
-                                      {String(value)}
-                                    </TableCell>
-                                  ))}
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </CardContent>
-                      </Card>
-
-                      <div className="flex justify-between">
-                        <Button variant="outline" onClick={() => setCurrentStep(2)}>
-                          返回修改
-                        </Button>
-                        <div className="flex space-x-2">
-                          <Button variant="outline" onClick={handleExportConfig}>
-                            <Download className="h-4 w-4 mr-2" />
-                            导出结果
-                          </Button>
-                          <Button onClick={handleApply} disabled={isProcessing}>
-                            {isProcessing ? (
-                              <>
-                                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                                应用中...
-                              </>
-                            ) : (
-                              <>
-                                <Save className="h-4 w-4 mr-2" />
-                                应用处理
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-center py-12">
-                      <Card>
-                        <CardContent className="p-8">
-                          <Eye className="h-16 w-16 mx-auto mb-4 text-gray-400" />
-                          <h3 className="text-xl font-semibold mb-2 text-gray-700">还没有预览结果</h3>
-                          <p className="text-gray-500 mb-6">
-                            请先配置数据清洗规则，然后执行预览操作查看处理结果
-                          </p>
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-center space-x-2 text-sm text-gray-600">
-                              <div className="flex items-center space-x-1">
-                                <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs">1</div>
-                                <span>配置清洗规则</span>
-                              </div>
-                              <div className="w-8 h-0.5 bg-gray-300"></div>
-                              <div className="flex items-center space-x-1">
-                                <div className="w-6 h-6 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center text-xs">2</div>
-                                <span>执行预览</span>
-                              </div>
-                              <div className="w-8 h-0.5 bg-gray-300"></div>
-                              <div className="flex items-center space-x-1">
-                                <div className="w-6 h-6 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center text-xs">3</div>
-                                <span>查看结果</span>
-                              </div>
-                            </div>
-                            <div className="flex justify-center space-x-3 mt-6">
-                              <Button 
-                                variant="outline" 
-                                onClick={() => setCurrentStep(2)}
-                                className="flex items-center space-x-2"
-                              >
-                                <Settings className="h-4 w-4" />
-                                <span>配置规则</span>
-                              </Button>
-                              <Button 
-                                onClick={handlePreview}
-                                disabled={isProcessing || cleaningRules.filter(r => r.enabled).length === 0}
-                                className="flex items-center space-x-2"
-                              >
-                                {isProcessing ? (
-                                  <>
-                                    <RefreshCw className="h-4 w-4 animate-spin" />
-                                    <span>处理中...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="h-4 w-4" />
-                                    <span>执行预览</span>
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                            {cleaningRules.filter(r => r.enabled).length === 0 && (
-                              <p className="text-sm text-orange-600 mt-3">
-                                ⚠️ 请先配置至少一个清洗规则
-                              </p>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
-                </TabsContent>
+                
               </Tabs>
             ) : (
               <div className="space-y-6">
@@ -1203,7 +1386,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
       {/* 确认弹窗 */}
       <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-  <DialogContent className="sm:max-w-md max-w-md w-[95vw] sm:w-auto">
+        <DialogContent className="sm:max-w-md max-w-md w-[95vw] sm:w-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center space-x-2">
               <AlertTriangle className="h-5 w-5 text-orange-500" />
@@ -1223,15 +1406,16 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
               )}
               {confirmAction === 'apply' && (
                 <div className="space-y-2">
-                  <p className="text-orange-600 font-medium">您即将应用数据预处理规则，这将：</p>
-                  <ul className="list-disc list-inside text-sm space-y-1 text-gray-600">
-                    <li>永久修改数据集</li>
-                    <li>应用所有配置的清洗规则</li>
-                    <li>无法撤销此操作</li>
-                  </ul>
-                  <p className="text-sm text-red-500 mt-2 font-medium">
-                    ⚠️ 建议在应用前先执行预览操作确认结果
+                  <p>
+                    您即将执行数据预处理：
+                    <span className="font-medium">{(datasetOptions.find(d => d.id === selectedDatasetId)?.name) || selectedDatasetId || '未选择数据集'}</span>
+                    ，操作，这将：
                   </p>
+                  <div className="bg-black text-blue-400 rounded-md px-3 py-2 font-medium space-y-1">
+                    <div>分析当前配置清洗规则</div>
+                    <div>对选择的数据集进行数据处理</div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-2">此操作不会修改原始数据。</p>
                 </div>
               )}
             </DialogDescription>
@@ -1247,7 +1431,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
               onClick={handleConfirm}
               variant={confirmAction === 'apply' ? 'destructive' : 'default'}
             >
-              {confirmAction === 'preview' ? '确认预览' : '确认应用'}
+              {confirmAction === 'preview' ? '确认预览' : '确认开始'}
             </Button>
           </div>
         </DialogContent>

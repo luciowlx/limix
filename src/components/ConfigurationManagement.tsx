@@ -65,8 +65,8 @@ export function ConfigurationManagement() {
     },
     {
       id: "scenario",
-      name: "业务场景",
-      description: "管理业务应用场景配置",
+      name: "任务类型配置",
+      description: "管理任务类型配置",
       icon: Layers,
       count: 18,
       isCustom: false

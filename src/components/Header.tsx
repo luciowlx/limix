@@ -1,4 +1,4 @@
-import { Bell, User, Settings, LogOut, Palette, Info, Bot, MessageCircle } from "lucide-react";
+import { Bell, User, Settings, LogOut, Palette, Info } from "lucide-react";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
@@ -11,12 +11,10 @@ interface HeaderProps {
   onOpenPersonalCenter?: () => void;
   onOpenPersonalizationSettings?: () => void;
   onOpenNotificationCenter?: () => void;
-  onOpenBot?: () => void;
-  onOpenAIAssistant?: () => void;
   onLogout?: () => void;
 }
 
-export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPersonalizationSettings, onOpenNotificationCenter, onOpenBot, onOpenAIAssistant, onLogout }: HeaderProps) {
+export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPersonalizationSettings, onOpenNotificationCenter, onLogout }: HeaderProps) {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -71,24 +69,6 @@ export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPer
       </div>
 
       <div className="flex items-center space-x-4">
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
-          onClick={() => onOpenBot?.()}
-          title="智能助手"
-        >
-          <Bot className="h-5 w-5" />
-        </Button>
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
-          onClick={() => onOpenAIAssistant?.()}
-          title="AI对话助手"
-        >
-          <MessageCircle className="h-5 w-5" />
-        </Button>
         <Button 
           variant="ghost" 
           size="icon" 

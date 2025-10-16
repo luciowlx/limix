@@ -19,6 +19,7 @@ import {
   ScheduleOutlined,
   ShareAltOutlined,
   SmileOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import {
   Attachments,
@@ -27,17 +28,16 @@ import {
   Prompts,
   Sender,
   Welcome,
-  useXAgent,
-  useXChat,
 } from '@ant-design/x';
-import { Avatar, Button, Flex, Space, Spin, message } from 'antd';
+import { Avatar, Button, Space, Spin, message } from 'antd';
+import CSVAnalysisDemo from './CSVAnalysisDemo';
 import { createStyles } from 'antd-style';
 import dayjs from 'dayjs';
 
 const DEFAULT_CONVERSATIONS_ITEMS = [
   {
     key: 'default-0',
-    label: '项目管理助手介绍',
+    label: 'limix智能助手介绍',
     group: '今天',
   },
   {
@@ -203,6 +203,12 @@ const useStyle = createStyles(({ token, css }) => {
       padding-block: ${token.paddingLG}px;
       gap: 16px;
     `,
+    closeBtn: css`
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 1000;
+    `,
     chatPrompt: css`
       .ant-prompts-label {
         color: #000000e0 !important;
@@ -253,6 +259,7 @@ interface GlobalAIAssistantProps {
 const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
   const { styles } = useStyle();
   const abortController = useRef<AbortController | null>(null);
+  const replyTimerRef = useRef<number | null>(null);
   
   // ==================== State ====================
   const [messageHistory, setMessageHistory] = useState<Record<string, any[]>>({});
@@ -262,38 +269,46 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
   const [attachedFiles, setAttachedFiles] = useState<any[]>([]);
   const [inputValue, setInputValue] = useState('');
 
-  // ==================== Runtime ====================
-  const [agent] = useXAgent({
-    baseURL: 'https://api.openai.com/v1',
-    model: 'gpt-3.5-turbo',
-    dangerouslyApiKey: 'Bearer your-api-key-here', // 请替换为实际的API密钥
-  });
-
-  const loading = agent.isRequesting();
-  const { onRequest, messages, setMessages } = useXChat({
-    agent,
-    requestFallback: (_, { error }) => {
-      if (error.name === 'AbortError') {
-        return '请求已取消';
-      }
-      return '请求失败，请重试！';
-    },
-    resolveAbortController: (controller) => {
-      abortController.current = controller;
-    },
-  });
+  // ==================== Runtime（前端原型：使用模拟数据，不触发后端/网络请求） ====================
+  // 不使用 useXAgent / useXChat，改为本地状态管理消息，避免配置校验导致运行时错误
+  const [messages, setMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showAnalysisDemo, setShowAnalysisDemo] = useState(false);
 
   // ==================== Event ====================
+  const buildMockReply = (input: string) => {
+    const lower = input.toLowerCase();
+    if (lower.includes('项目') || lower.includes('project')) {
+      return '已为你整理项目管理关键流程：\n- 需求确认与范围界定\n- 里程碑与任务拆分（支持甘特图与看板）\n- 风险清单与应对方案\n- 数据/模型/任务三视图联动\n- 进度与质量指标（准确率/召回率/工期偏差）\n如需演示，我可以基于当前示例项目生成「项目进度报告」与可视化摘要。';
+    }
+    if (lower.includes('团队') || lower.includes('协作')) {
+      return '团队协作建议如下：\n- 角色与权限：管理员/成员/访客分级\n- 评论与@提醒：支持任务、数据集与模型侧边栏讨论\n- 版本管理：数据集与模型支持版本标签与变更记录\n- 通知中心：合并未读提醒，支持筛选与跳转\n我也可以创建「协作清单」模板，帮助你快速分工与跟踪。';
+    }
+    if (lower.includes('数据') || lower.includes('分析')) {
+      return '数据分析工作台示例：\n- 数据概览：样本量/缺失率/分布图\n- 质量检查：异常值与数据漂移监测\n- 可视化：折线/柱状/饼图与因果关系图\n- 报告导出：支持 Markdown/HTML 两种格式\n我已为你准备了演示数据，随时可以生成图表或报告。';
+    }
+    if (lower.includes('帮助') || lower.includes('使用')) {
+      return '系统使用指南：\n- 左侧导航进入看板/项目/数据/任务/模型/系统管理\n- 右上角「智能助手」为统一入口，支持多会话、上传附件与快捷提示\n- 任何页面均可唤起助手获取解释或生成报告\n需要我按你的需求生成一个「快速上手清单」吗？';
+    }
+    return '我已收到你的请求：「' + input + '」。以下是可执行的演示动作：\n1) 生成任务配置草案（含参数与资源配额）\n2) 创建数据质量概览图并解释关键指标\n3) 输出项目周报模板并填写示例内容\n你也可以上传文件，我会在聊天中做要点提取与结构化摘要。';
+  };
+
   const onSubmit = (val: string) => {
     if (!val) return;
     if (loading) {
-      message.error('请求正在进行中，请等待请求完成。');
+      message.error('助手正在响应中，请稍后再试或取消当前回复。');
       return;
     }
-    onRequest({
-      stream: true,
-      message: { role: 'user', content: val },
-    });
+    // 追加用户消息
+    setMessages([...(messages || []), { role: 'user', content: val }]);
+    setLoading(true);
+    // 模拟思考，再追加 AI 回复
+    const timer = window.setTimeout(() => {
+      const reply = buildMockReply(val);
+      setMessages([...(messages || []), { role: 'user', content: val }, { role: 'assistant', content: reply }]);
+      setLoading(false);
+    }, 800);
+    replyTimerRef.current = timer;
   };
 
   // ==================== Nodes ====================
@@ -315,14 +330,15 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
         }}>
           AI
         </div>
-        <span>项目管理助手</span>
+        <span>limix智能助手</span>
       </div>
 
       {/* 添加会话 */}
       <Button
         onClick={() => {
-          if (agent.isRequesting()) {
-            message.error('消息正在请求中，请等待请求完成或立即中止...');
+          // 当正在生成回复时，不允许切换来创建新会话
+          if (loading) {
+            message.error('消息正在响应中，请等待完成或取消当前回复');
             return;
           }
           const now = dayjs().valueOf().toString();
@@ -396,25 +412,32 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
   const chatList = (
     <div className={styles.chatList}>
       {messages?.length ? (
-        <Bubble.List
-          items={messages || []}
-          style={{ height: '100%', paddingInline: 'calc(calc(100% - 700px) /2)' }}
-          roles={{
-            assistant: {
-              placement: 'start',
-              footer: (
-                <div style={{ display: 'flex' }}>
-                  <Button type="text" size="small" icon={<ReloadOutlined />} />
-                  <Button type="text" size="small" icon={<CopyOutlined />} />
-                  <Button type="text" size="small" icon={<LikeOutlined />} />
-                  <Button type="text" size="small" icon={<DislikeOutlined />} />
-                </div>
-              ),
-              loadingRender: () => <Spin size="small" />,
-            },
-            user: { placement: 'end' },
-          }}
-        />
+        <>
+          <Bubble.List
+            items={messages || []}
+            style={{ height: '100%', paddingInline: 'calc(calc(100% - 700px) /2)' }}
+            roles={{
+              assistant: {
+                placement: 'start',
+                footer: (
+                  <div style={{ display: 'flex' }}>
+                    <Button type="text" size="small" icon={<ReloadOutlined />} />
+                    <Button type="text" size="small" icon={<CopyOutlined />} />
+                    <Button type="text" size="small" icon={<LikeOutlined />} />
+                    <Button type="text" size="small" icon={<DislikeOutlined />} />
+                  </div>
+                ),
+                loadingRender: () => <Spin size="small" />,
+              },
+              user: { placement: 'end' },
+            }}
+          />
+          {showAnalysisDemo && (
+            <div style={{ paddingInline: 'calc(calc(100% - 700px) /2)' }}>
+              <CSVAnalysisDemo onClose={() => setShowAnalysisDemo(false)} />
+            </div>
+          )}
+        </>
       ) : (
         <Space
           direction="vertical"
@@ -440,7 +463,7 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
                 AI
               </div>
             }
-            title="你好，我是项目管理助手"
+            title="你好，我是 limix智能助手"
             description="基于AI技术，为您提供专业的项目管理建议和帮助~"
             extra={
               <Space>
@@ -449,7 +472,7 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
               </Space>
             }
           />
-          <Flex gap={16}>
+          <div style={{ display: 'flex', gap: 16 }}>
             <Prompts
               items={[HOT_TOPICS]}
               styles={{
@@ -480,11 +503,21 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
                 subItem: { background: '#ffffffa6' },
               }}
               onItemClick={(info) => {
-                onSubmit(info.data.description);
+                // 点击“数据分析”展示 CSV 演示工作台，其它项走常规聊天流程
+                if (info?.data?.label === '数据分析' || String(info?.data?.description || '').includes('数据分析')) {
+                  setShowAnalysisDemo(true);
+                } else {
+                  onSubmit(info.data.description);
+                }
               }}
               className={styles.chatPrompt}
             />
-          </Flex>
+          </div>
+          {showAnalysisDemo && (
+            <div style={{ paddingInline: 'calc(calc(100% - 700px) /2)' }}>
+              <CSVAnalysisDemo onClose={() => setShowAnalysisDemo(false)} />
+            </div>
+          )}
         </Space>
       )}
     </div>
@@ -520,7 +553,12 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
       <Prompts
         items={SENDER_PROMPTS}
         onItemClick={(info) => {
-          onSubmit(info.data.description);
+          const text = String(info?.data?.description || '');
+          if (text.includes('数据分析')) {
+            setShowAnalysisDemo(true);
+          } else {
+            onSubmit(info.data.description);
+          }
         }}
         styles={{
           item: { padding: '6px 12px' },
@@ -537,7 +575,12 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
         }}
         onChange={setInputValue}
         onCancel={() => {
-          abortController.current?.abort();
+          // 取消当前模拟回复
+          if (replyTimerRef.current) {
+            clearTimeout(replyTimerRef.current);
+            replyTimerRef.current = null;
+          }
+          setLoading(false);
         }}
         prefix={
           <Button
@@ -552,10 +595,10 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
         actions={(_, info) => {
           const { SendButton, LoadingButton, SpeechButton } = info.components;
           return (
-            <Flex gap={4}>
+            <div style={{ display: 'flex', gap: 4 }}>
               <SpeechButton className={styles.speechButton} />
               {loading ? <LoadingButton type="default" /> : <SendButton type="primary" />}
-            </Flex>
+            </div>
           );
         }}
         placeholder="询问或输入 / 使用技能"
@@ -576,6 +619,10 @@ const GlobalAIAssistant: React.FC<GlobalAIAssistantProps> = ({ onClose }) => {
   // ==================== Render =================
   return (
     <div className={styles.layout}>
+      {/* 关闭按钮（统一入口的浮层可随时关闭）*/}
+      {onClose && (
+        <Button type="text" className={styles.closeBtn} icon={<CloseOutlined />} onClick={onClose} />
+      )}
       {chatSider}
       <div className={styles.chat}>
         {chatList}

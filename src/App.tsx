@@ -9,10 +9,8 @@ import { SystemManagement } from "./components/SystemManagement";
 import { PersonalCenterDialog } from "./components/PersonalCenterDialog";
 import { PersonalizationSettings } from "./components/PersonalizationSettings";
 import { SoloMode } from "./components/SoloMode";
-import { GlobalBot } from "./components/GlobalBot";
 import { FullPageView } from "./components/FullPageView";
 import { ReportView } from "./components/ReportView";
-import GlobalAIAssistant from "./components/GlobalAIAssistant";
 import { DataDetailFullPage } from "./components/DataDetailFullPage";
 import TaskDetailFullPage from "./components/TaskDetailFullPage";
 import TaskCompare from "./components/TaskCompare";
@@ -30,6 +28,7 @@ import { Badge } from "./components/ui/badge";
 import { X, Search, Grid3X3, List, ChevronDown, Calendar, Users, Database, TrendingUp, Clock, CheckCircle, Settings, UserPlus, Mail, Trash2, Eye, Archive, Copy, ToggleLeft, ToggleRight } from "lucide-react";
 import { Toaster } from "./components/ui/sonner";
 import { Checkbox } from "./components/ui/checkbox";
+import FloatingAssistantEntry from "./components/FloatingAssistantEntry";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("看板");
@@ -90,7 +89,7 @@ export default function App() {
   const [systemManagementSubTab, setSystemManagementSubTab] = useState("overview");
 
   // 全页面视图状态
-  const [fullPageViewType, setFullPageViewType] = useState<'personal-center' | 'personalization-settings' | 'notification-center' | 'global-bot' | 'ai-assistant' | 'data-detail' | 'task-detail' | null>(null);
+  const [fullPageViewType, setFullPageViewType] = useState<'personal-center' | 'personalization-settings' | 'notification-center' | 'ai-assistant' | 'data-detail' | 'task-detail' | null>(null);
   const [isReportViewOpen, setIsReportViewOpen] = useState(false);
 
   // 数据详情全页面状态
@@ -99,8 +98,7 @@ export default function App() {
   // 任务详情全页面状态
   const [selectedTaskForFullPage, setSelectedTaskForFullPage] = useState<any>(null);
 
-  // AI助手状态
-  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  // AI助手已统一到 FullPageView（type='ai-assistant'），不再单独维护 isAIAssistantOpen
 
   // 团队成员管理状态
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
@@ -467,9 +465,9 @@ export default function App() {
     }
   };
 
-  // 智能助手处理函数
-  const handleOpenBot = () => {
-    setFullPageViewType('global-bot');
+  // 智能助手入口（统一为 FullPageView -> ai-assistant）
+  const handleOpenAIAssistant = () => {
+    setFullPageViewType('ai-assistant');
   };
 
   const renderContent = () => {
@@ -1525,8 +1523,6 @@ export default function App() {
         onOpenPersonalCenter={handleOpenPersonalCenter}
         onOpenPersonalizationSettings={handleOpenPersonalizationSettings}
         onOpenNotificationCenter={handleOpenNotificationCenter}
-        onOpenBot={handleOpenBot}
-        onOpenAIAssistant={() => setIsAIAssistantOpen(true)}
         onLogout={handleLogout}
       />
       
@@ -1560,12 +1556,7 @@ export default function App() {
         <ReportView onClose={() => setIsReportViewOpen(false)} />
       )}
 
-      {/* AI助手 */}
-      {isAIAssistantOpen && (
-        <GlobalAIAssistant 
-          onClose={() => setIsAIAssistantOpen(false)}
-        />
-      )}
+      {/* AI助手已统一到 FullPageView（type='ai-assistant'） */}
 
       {/* 浮动预览入口：任务对比 */}
       <div className="fixed bottom-6 right-6 space-y-2 z-50">
@@ -1586,6 +1577,9 @@ export default function App() {
           <TaskCompare task1={taskCompareDemoA as any} task2={taskCompareDemoB as any} onBack={() => setShowTaskCompareDemo(false)} />
         </DialogContent>
       </Dialog>
+
+      {/* 全局悬浮动态助手入口（与右上角智能助手按钮同源） */}
+      <FloatingAssistantEntry onOpenAIAssistant={handleOpenAIAssistant} />
 
       <Toaster />
     </div>
