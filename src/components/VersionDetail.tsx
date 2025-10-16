@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { ArrowLeft, Calendar, User, Database, FileText, BarChart3, Settings } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { ArrowLeft, Calendar, User, Database, FileText, BarChart3, Settings, CheckCircle, AlertTriangle } from 'lucide-react';
 
 interface Version {
   id: string;
@@ -34,6 +36,7 @@ interface VersionDetailProps {
 }
 
 const VersionDetail: React.FC<VersionDetailProps> = ({ version, datasetName, onBack }) => {
+  const [previewRows, setPreviewRows] = useState<number>(20);
   const getStatusBadge = (status: string) => {
     return (
       <Badge variant={status === '成功' ? 'default' : 'destructive'}>
@@ -55,6 +58,42 @@ const VersionDetail: React.FC<VersionDetailProps> = ({ version, datasetName, onB
       </Badge>
     );
   };
+
+  // 预处理后数据结构与示例数据（示例/占位，用于预览展示）
+  const processedSchema = useMemo(
+    () => (
+      [
+        { name: 'PassengerId', type: 'number', status: '标准化' },
+        { name: 'Survived', type: 'number', status: '标签转换' },
+        { name: 'Pclass', type: 'number', status: '缺失值填充' },
+        { name: 'Name', type: 'string', status: '去重/清洗' },
+        { name: 'Sex', type: 'string', status: '枚举校验' },
+        { name: 'Age', type: 'number', status: '缺失值填充' },
+        { name: 'SibSp', type: 'number', status: '标准化' },
+        { name: 'Parch', type: 'number', status: '标准化' },
+        { name: 'Ticket', type: 'string', status: '格式化' },
+        { name: 'Fare', type: 'number', status: '异常值处理' },
+        { name: 'Cabin', type: 'string', status: '缺失值标记' },
+        { name: 'Embarked', type: 'string', status: '枚举校验' },
+      ]
+    ),
+    []
+  );
+
+  const processedRows = useMemo(() => (
+    [
+      { PassengerId: 1, Survived: 0, Pclass: 3, Name: 'Braund, Mr. Owen Harris', Sex: 'male', Age: 22, SibSp: 1, Parch: 0, Ticket: 'A/5 21171', Fare: 7.25, Cabin: null, Embarked: 'S' },
+      { PassengerId: 2, Survived: 1, Pclass: 1, Name: 'Cumings, Mrs. Bradley (Florence Briggs Thayer)', Sex: 'female', Age: 38, SibSp: 1, Parch: 0, Ticket: 'PC 17599', Fare: 71.2833, Cabin: 'C85', Embarked: 'C' },
+      { PassengerId: 3, Survived: 1, Pclass: 3, Name: 'Heikkinen, Miss. Laina', Sex: 'female', Age: 26, SibSp: 0, Parch: 0, Ticket: 'STON/O2. 3101282', Fare: 7.925, Cabin: null, Embarked: 'S' },
+      { PassengerId: 4, Survived: 1, Pclass: 1, Name: 'Futrelle, Mrs. Jacques Heath (Lily May Peel)', Sex: 'female', Age: 35, SibSp: 1, Parch: 0, Ticket: '113803', Fare: 53.1, Cabin: 'C123', Embarked: 'S' },
+      { PassengerId: 5, Survived: 0, Pclass: 3, Name: 'Allen, Mr. William Henry', Sex: 'male', Age: 35, SibSp: 0, Parch: 0, Ticket: '373450', Fare: 8.05, Cabin: null, Embarked: 'S' },
+      { PassengerId: 6, Survived: 0, Pclass: 3, Name: 'Montvila, Rev. Juozas', Sex: 'male', Age: 27, SibSp: 0, Parch: 0, Ticket: '211536', Fare: 13, Cabin: null, Embarked: 'S' },
+      { PassengerId: 7, Survived: 0, Pclass: 1, Name: 'Graham, Miss. Margaret Edith', Sex: 'female', Age: 19, SibSp: 0, Parch: 0, Ticket: '112053', Fare: 30, Cabin: 'B42', Embarked: 'S' },
+      { PassengerId: 8, Survived: 0, Pclass: 3, Name: 'Johnston, Miss. Catherine Helen "Carrie"', Sex: 'female', Age: 19, SibSp: 1, Parch: 0, Ticket: 'W./C. 6607', Fare: 23.45, Cabin: null, Embarked: 'S' },
+      { PassengerId: 9, Survived: 1, Pclass: 3, Name: 'Behr, Mr. Karl Howell', Sex: 'male', Age: 26, SibSp: 0, Parch: 0, Ticket: '111369', Fare: 30, Cabin: 'C148', Embarked: 'C' },
+      { PassengerId: 10, Survived: 1, Pclass: 3, Name: 'Dooley, Mr. Patrick', Sex: 'male', Age: 32, SibSp: 0, Parch: 0, Ticket: '370376', Fare: 7.75, Cabin: null, Embarked: 'S' },
+    ]
+  ), []);
 
   return (
     <div className="space-y-6">
@@ -249,6 +288,79 @@ const VersionDetail: React.FC<VersionDetailProps> = ({ version, datasetName, onB
           </CardContent>
         </Card>
       )}
+
+      {/* 版本数据预览 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>版本数据预览（预处理后）</span>
+            <div className="flex items-center space-x-3">
+              <span className="text-sm text-gray-600">选择预览行数:</span>
+              <Select value={String(previewRows)} onValueChange={(v) => setPreviewRows(Number(v))}>
+                <SelectTrigger className="w-24">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">5</SelectItem>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* 数据结构与字段处理状态 */}
+          <div>
+            <h4 className="font-semibold mb-3">数据结构与字段处理状态</h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {processedSchema.map((field) => (
+                <div key={field.name} className="p-3 border rounded-lg bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-sm">{field.name}</span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">{field.type}</span>
+                  </div>
+                  <div className="mt-2 flex items-center text-xs text-gray-600">
+                    {field.status?.includes('异常') ? (
+                      <AlertTriangle className="h-3 w-3 text-orange-500 mr-1" />
+                    ) : (
+                      <CheckCircle className="h-3 w-3 text-green-500 mr-1" />
+                    )}
+                    <span>{field.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 表格预览 */}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {processedSchema.map((f) => (
+                    <TableHead key={f.name} className="text-sm text-gray-600">{f.name}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {processedRows.slice(0, previewRows).map((row, idx) => (
+                  <TableRow key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                    {processedSchema.map((f) => (
+                      <TableCell key={f.name} className="py-2 px-3 text-sm">
+                        {String((row as any)[f.name] ?? '')}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* 说明 */}
+          <p className="text-xs text-gray-500">注：为保证预览性能，本界面展示经过预处理后的示例数据与字段状态。实际数据以导入/清洗结果为准。</p>
+        </CardContent>
+      </Card>
     </div>
   );
 };

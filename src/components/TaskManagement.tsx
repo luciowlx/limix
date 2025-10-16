@@ -28,8 +28,11 @@ import {
   ArrowUp,
   ArrowDown,
   User,
-  GitCompare
+  GitCompare,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -69,21 +72,42 @@ import {
 } from './ui/table';
 import TaskCompare from './TaskCompare';
 
-// 任务类型定义
-type TaskType = 'prediction' | 'classification' | 'evaluation' | 'regression';
+// 模拟项目列表（后续可替换为真实项目数据）
+const mockProjects = [
+  { id: 'proj_001', name: '钢铁缺陷预测' },
+  { id: 'proj_002', name: '电力能源预测' },
+  { id: 'proj_003', name: '工艺时序预测' },
+  { id: 'proj_004', name: '设备故障预测' },
+];
+const getProjectName = (id: string) => mockProjects.find(p => p.id === id)?.name || '未选择项目';
+
+// 任务类型定义（优化为：时序预测、分类、回归）
+type TaskType = 'forecasting' | 'classification' | 'regression';
 type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'archived';
 type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 type ViewMode = 'table' | 'grid';
 type SortField = 'createdAt' | 'completedAt' | 'status' | 'priority' | 'taskName';
 type SortOrder = 'asc' | 'desc';
 
+// 支持多数据集选择的条目类型（新增）
+interface SelectedDatasetEntry {
+  id: string;
+  name: string;
+  version: string;
+}
+
 // 任务接口定义
 interface Task {
   id: string;
   taskName: string;
   taskType: TaskType;
+  // 新增：所属项目信息
+  projectId?: string;
+  projectName?: string;
   datasetName: string;
   datasetVersion: string;
+  // 新增：支持多数据集（保持向后兼容）
+  datasets?: SelectedDatasetEntry[];
   modelName: string;
   priority: TaskPriority;
   status: TaskStatus;
@@ -102,6 +126,8 @@ interface Task {
 interface FilterOptions {
   taskType: TaskType | 'all';
   status: TaskStatus | 'all';
+  // 新增：按项目筛选（使用项目ID，'all' 表示全部项目）
+  projectId?: string | 'all';
   datasetName: string;
   modelName: string;
   priority: TaskPriority | 'all';
@@ -145,15 +171,20 @@ interface TaskManagementProps {
   isCreateTaskDialogOpen?: boolean;
   onCreateTaskDialogChange?: (open: boolean) => void;
   onOpenTaskDetailFullPage?: (task: Task) => void;
+  // 新增：控制创建成功后是否自动打开详情页，默认保持在列表
+  autoOpenDetailAfterCreate?: boolean;
 }
 
 // 更新FormData接口，添加数据集相关字段
 interface FormData {
   taskName: string;
   taskType: TaskType;
+  projectId: string; // 所属项目（必填）
   datasetName: string;
   datasetVersion: string;
   selectedDataset: DatasetInfo | null; // 新增：选中的数据集详细信息
+  // 新增：多数据集（含版本）已选列表
+  selectedDatasets: SelectedDatasetEntry[];
   modelName: string;
   models: string[]; // 支持多模型选择
   modelSelectionMode: 'single' | 'multiple'; // 新增：模型选择模式
@@ -162,13 +193,31 @@ interface FormData {
   priority: TaskPriority;
   description: string;
   config: string;
-  hyperparameterMode: 'auto' | 'manual'; // 超参数配置模式
-  autoMLConfig: {
-    maxTime: number; // 早停时间（分钟）
-    searchSpace: string;
+  // 参数配置模式：页面配置 或 JSON 手动导入
+  hyperparameterMode: 'page' | 'json';
+  // 页面配置：按任务类型分别保存
+  forecastingConfig: {
+    contextLength: number; // 上下文长度
+    forecastLength: number; // 预测长度
+    stepLength: number; // 预测步长
+    startTime: string; // 预测开始时间（日期+时间）
+    mainVariableFile?: string; // 主变量文件（可选）
+    covariateFiles: string[]; // 协变量文件列表（可选）
   };
-  manualConfig: string; // JSON格式手动配置
-  resourceType: 'cpu' | 'gpu' | 'auto'; // 运行资源类型
+  classificationConfig: {
+    trainRatio: number; // 训练集比例(%)
+    testRatio: number; // 测试集比例(%)
+    shuffle: boolean; // 是否洗牌
+  };
+  regressionConfig: {
+    trainRatio: number; // 训练集比例(%)
+    testRatio: number; // 测试集比例(%)
+    shuffle: boolean; // 是否洗牌
+  };
+  // JSON格式手动配置
+  manualConfig: string;
+  // 运行资源类型
+  resourceType: 'cpu' | 'gpu' | 'auto';
   resourceConfig: {
     cores: number;
     memory: number; // GB
@@ -176,19 +225,37 @@ interface FormData {
   };
 }
 
-const TaskManagement: React.FC<TaskManagementProps> = ({
-  isCreateTaskDialogOpen = false,
-  onCreateTaskDialogChange,
-  onOpenTaskDetailFullPage
-}) => {
+  const TaskManagement: React.FC<TaskManagementProps> = ({
+    isCreateTaskDialogOpen = false,
+    onCreateTaskDialogChange,
+    onOpenTaskDetailFullPage,
+    autoOpenDetailAfterCreate = false,
+  }) => {
+    // 创建任务弹窗分步导航（4步）
+    const [currentStep, setCurrentStep] = useState<number>(1);
+    const steps = [
+      { number: 1, label: '基础信息配置' },
+      { number: 2, label: '数据与目标' },
+      { number: 3, label: '模型选择' },
+      { number: 4, label: '参数配置' },
+    ];
   // 状态管理
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [isCompareDemoOpen, setIsCompareDemoOpen] = useState(false);
+  // 全屏模式状态（创建任务弹窗）
+  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+  // 任务对比预览：示例类型选择（分类/回归/时序预测）
+  const [compareDemoType, setCompareDemoType] = useState<TaskType>('classification');
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  // 新增：创建成功后用于高亮并滚动定位的任务ID
+  const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'createdAt', order: 'desc' });
   const [showFilters, setShowFilters] = useState(false);
   const [selectedTaskForDetails, setSelectedTaskForDetails] = useState<Task | null>(null);
+  // 编辑模式状态
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   
   // 确认对话框状态
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -207,6 +274,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
   const [filters, setFilters] = useState<FilterOptions>({
     taskType: 'all',
     status: 'all',
+    projectId: 'all',
     datasetName: '',
     modelName: '',
     priority: 'all',
@@ -217,22 +285,38 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
   // 任务创建表单状态
   const [formData, setFormData] = useState<FormData>({
     taskName: '',
-    taskType: 'prediction',
+    taskType: 'forecasting',
+    projectId: '',
     datasetName: '',
-    datasetVersion: '',
-    selectedDataset: null,
-    modelName: '',
-    models: [],
-    modelSelectionMode: 'multiple',
-    targetFields: [],
-    availableFields: [],
+  datasetVersion: '',
+  selectedDataset: null,
+  selectedDatasets: [],
+  modelName: '',
+  models: [],
+  modelSelectionMode: 'multiple',
+  targetFields: [],
+  availableFields: [],
     priority: 'medium',
     description: '',
     config: '',
-    hyperparameterMode: 'auto',
-    autoMLConfig: {
-      maxTime: 60,
-      searchSpace: 'default'
+    hyperparameterMode: 'page',
+    forecastingConfig: {
+      contextLength: 24,
+      forecastLength: 12,
+      stepLength: 1,
+      startTime: '',
+      mainVariableFile: undefined,
+      covariateFiles: []
+    },
+    classificationConfig: {
+      trainRatio: 80,
+      testRatio: 20,
+      shuffle: false
+    },
+    regressionConfig: {
+      trainRatio: 80,
+      testRatio: 20,
+      shuffle: false
     },
     manualConfig: '',
     resourceType: 'auto',
@@ -322,9 +406,34 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
         { user_id: 'U001', age: 28, purchase_amount: 299.99, category: 'electronics', satisfaction: 4.5 },
         { user_id: 'U002', age: 35, purchase_amount: 159.50, category: 'clothing', satisfaction: 4.2 },
         { user_id: 'U003', age: 42, purchase_amount: 89.99, category: 'books', satisfaction: 4.8 }
-      ]
+  ]
     }
   ]);
+
+  // 多数据集：根据已选的数据集列表自动更新可用字段（公共字段交集）
+  useEffect(() => {
+    let intersection: Set<string> | null = null;
+    formData.selectedDatasets.forEach((sd) => {
+      const ds = availableDatasets.find((d) => d.id === sd.id);
+      const fields = ds?.previewData && ds.previewData.length > 0
+        ? Object.keys(ds.previewData[0])
+        : [];
+      if (intersection === null) {
+        intersection = new Set(fields);
+      } else {
+        const next = new Set<string>();
+        fields.forEach((f) => { if (intersection && intersection.has(f)) next.add(f); });
+        intersection = next;
+      }
+    });
+    // 保证交集数组类型稳定为 string[]，避免在 TS 推断中出现 never[]
+    const intersectionArr: string[] = intersection ? Array.from(intersection) : [];
+    setFormData((prev) => {
+      const same = prev.availableFields.length === intersectionArr.length && prev.availableFields.every((f) => intersectionArr.includes(f));
+      if (same) return prev;
+      return { ...prev, availableFields: intersectionArr };
+    });
+  }, [formData.selectedDatasets, availableDatasets]);
 
   const [availableModels] = useState([
     { 
@@ -335,7 +444,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       description: '基于梯度提升的高性能分类算法，适用于结构化数据分类任务',
       accuracy: '92.5%',
       size: '15.2MB',
-      supportedTasks: ['classification', 'prediction'],
+      supportedTasks: ['classification', 'forecasting'],
       trainingTime: '~30分钟',
       features: ['高准确率', '快速训练', '特征重要性分析']
     },
@@ -347,7 +456,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       description: '轻量级梯度提升框架，专为回归任务优化',
       accuracy: '89.3%',
       size: '8.7MB',
-      supportedTasks: ['regression', 'prediction'],
+      supportedTasks: ['regression', 'forecasting'],
       trainingTime: '~20分钟',
       features: ['内存效率高', '训练速度快', '支持类别特征']
     },
@@ -359,7 +468,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       description: '深度学习神经网络，适用于复杂模式识别',
       accuracy: '94.1%',
       size: '45.6MB',
-      supportedTasks: ['classification', 'regression', 'prediction'],
+      supportedTasks: ['classification', 'regression', 'forecasting'],
       trainingTime: '~2小时',
       features: ['高精度', '强泛化能力', '支持复杂特征']
     },
@@ -383,18 +492,19 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       description: 'AutoML自动机器学习框架，自动选择最优模型',
       accuracy: '95.2%',
       size: '78.9MB',
-      supportedTasks: ['classification', 'regression', 'prediction'],
+      supportedTasks: ['classification', 'regression', 'forecasting'],
       trainingTime: '~3小时',
       features: ['自动调参', '模型集成', '无需专业知识']
     }
   ]);
 
   // 模拟任务数据
-  const [tasks] = useState<Task[]>([
+  const [tasks, setTasks] = useState<Task[]>([
     {
       id: 'TASK-001',
       taskName: '销售数据预测模型训练',
-      taskType: 'prediction',
+      taskType: 'forecasting',
+      projectId: 'proj_003',
       datasetName: '销售数据集',
       datasetVersion: 'v2.1',
       modelName: 'Limix',
@@ -412,6 +522,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       id: 'TASK-002',
       taskName: '用户行为分析',
       taskType: 'classification',
+      projectId: 'proj_004',
       datasetName: '用户行为数据',
       datasetVersion: 'v1.3',
       modelName: 'XGBoost',
@@ -426,7 +537,8 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     {
       id: 'TASK-003',
       taskName: '产品推荐算法优化',
-      taskType: 'evaluation',
+      taskType: 'classification',
+      projectId: 'proj_001',
       datasetName: '产品数据集',
       datasetVersion: 'v3.0',
       modelName: 'DeepLearning',
@@ -442,6 +554,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       id: 'TASK-004',
       taskName: '客户流失预测',
       taskType: 'regression',
+      projectId: 'proj_004',
       datasetName: '客户数据集',
       datasetVersion: 'v1.8',
       modelName: 'Limix',
@@ -458,7 +571,8 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     {
       id: 'TASK-005',
       taskName: '库存优化模型',
-      taskType: 'prediction',
+      taskType: 'forecasting',
+      projectName: '电力能源预测',
       datasetName: '库存数据',
       datasetVersion: 'v2.5',
       modelName: 'Limix',
@@ -471,6 +585,27 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       description: '优化库存管理策略',
       estimatedTime: 200,
       actualTime: 185
+    },
+    // 新增：演示多数据集联合训练的任务，便于预览多数据集聚合统计
+    {
+      id: 'TASK-006',
+      taskName: '多数据集联合预测实验',
+      taskType: 'forecasting',
+      projectId: 'proj_002',
+      datasetName: '生产质量数据集',
+      datasetVersion: 'v3',
+      datasets: [
+        { id: 'DATA-2025-001', name: '生产质量数据集', version: 'v3' },
+        { id: 'DATA-2025-002', name: '客户行为数据集', version: 'v2' }
+      ],
+      modelName: 'AutoGluon-Tabular',
+      priority: 'high',
+      status: 'running',
+      progress: 30,
+      createdAt: '2025-01-16T09:50:00Z',
+      createdBy: '测试用户',
+      description: '跨数据源联合训练以提升预测准确率',
+      estimatedTime: 180
     }
   ]);
 
@@ -503,14 +638,13 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     return configs[priority];
   };
 
-  // 任务类型映射
+  // 任务类型映射（中文标签）
   const getTaskTypeLabel = (type: TaskType) => {
     const labels = {
-      prediction: '预测',
+      forecasting: '时序预测',
       classification: '分类',
-      evaluation: '评估',
-      regression: '回归'
-    };
+      regression: '回归',
+    } as const;
     return labels[type];
   };
 
@@ -546,6 +680,15 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       // 模型名称筛选
       if (filters.modelName && !task.modelName.toLowerCase().includes(filters.modelName.toLowerCase())) {
         return false;
+      }
+
+      // 所属项目筛选（优先按ID匹配，兼容仅有名称的旧数据）
+      if (filters.projectId && filters.projectId !== 'all') {
+        const projectIdMatches = task.projectId && task.projectId === filters.projectId;
+        const projectNameMatches = task.projectName && (task.projectName === getProjectName(String(filters.projectId)));
+        if (!projectIdMatches && !projectNameMatches) {
+          return false;
+        }
       }
 
       // 优先级筛选
@@ -633,14 +776,21 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       errors.taskType = '请选择任务类型';
     }
 
-    // 数据集验证
-    if (!formData.selectedDataset) {
-      errors.datasetName = '请选择数据集';
+    // 项目选择验证
+    if (!formData.projectId || formData.projectId.trim() === '') {
+      errors.projectId = '请选择所属项目';
     }
 
-    // 数据版本验证
-    if (!formData.datasetVersion) {
-      errors.datasetVersion = '请选择数据版本';
+    // 数据集验证（支持多选）
+    if (!formData.selectedDatasets || formData.selectedDatasets.length === 0) {
+      // 使用 datasetName 错误键以兼容现有UI提示位置
+      errors.datasetName = '请至少选择一个数据集';
+    } else {
+      // 检查每个数据集是否选择了版本
+      const hasMissingVersion = formData.selectedDatasets.some((d) => !d.version);
+      if (hasMissingVersion) {
+        errors.datasetVersion = '请为每个已选择的数据集选择对应的版本';
+      }
     }
 
     // 目标字段验证（可选）
@@ -661,26 +811,55 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       }
     }
 
-    // 超参数配置验证
-    if (formData.hyperparameterMode === 'auto') {
-      // AutoML配置验证
-      if (formData.autoMLConfig.maxTime < 5 || formData.autoMLConfig.maxTime > 1440) {
-        errors.autoMLMaxTime = '搜索时间应在5-1440分钟之间';
-      }
-      if (!formData.autoMLConfig.searchSpace) {
-        errors.autoMLSearchSpace = '请选择搜索空间';
+    // 超参数/任务配置验证
+    if (formData.hyperparameterMode === 'page') {
+      // 根据任务类型校验对应的页面配置
+      if (formData.taskType === 'forecasting') {
+        const fc = formData.forecastingConfig;
+        if (!fc || fc.contextLength < 1 || fc.contextLength > 10000) {
+          errors.forecastingContextLength = '上下文长度应在1-10000之间';
+        }
+        if (!fc || fc.forecastLength < 1 || fc.forecastLength > 10000) {
+          errors.forecastingForecastLength = '预测长度应在1-10000之间';
+        }
+        if (!fc || fc.stepLength < 1 || fc.stepLength > 10000) {
+          errors.forecastingStepLength = '步长应在1-10000之间';
+        }
+        if (!fc || !String(fc.startTime || '').trim()) {
+          errors.forecastingStartTime = '请选择预测开始时间';
+        }
+      } else if (formData.taskType === 'classification') {
+        const cc = formData.classificationConfig;
+        if (!cc) {
+          errors.classificationSplit = '请完善分类任务的训练/测试集配置';
+        } else {
+          const sum = cc.trainRatio + cc.testRatio;
+          if (cc.trainRatio <= 0 || cc.testRatio <= 0 || sum !== 100) {
+            errors.classificationSplit = '训练/测试比例必须为正且相加等于100%';
+          }
+        }
+      } else if (formData.taskType === 'regression') {
+        const rc = formData.regressionConfig;
+        if (!rc) {
+          errors.regressionSplit = '请完善回归任务的训练/测试集配置';
+        } else {
+          const sum = rc.trainRatio + rc.testRatio;
+          if (rc.trainRatio <= 0 || rc.testRatio <= 0 || sum !== 100) {
+            errors.regressionSplit = '训练/测试比例必须为正且相加等于100%';
+          }
+        }
       }
     } else {
-      // 手动配置验证
+      // JSON配置验证
       if (!formData.manualConfig.trim()) {
-        errors.manualConfig = '请输入超参数配置';
+        errors.manualConfig = '请输入参数配置';
       } else {
         try {
           const config = JSON.parse(formData.manualConfig);
           if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-            errors.manualConfig = '超参数配置必须是有效的JSON对象';
+            errors.manualConfig = '参数配置必须是有效的JSON对象';
           } else if (Object.keys(config).length === 0) {
-            errors.manualConfig = '超参数配置不能为空对象';
+            errors.manualConfig = '参数配置不能为空对象';
           }
         } catch (e) {
           errors.manualConfig = 'JSON格式不正确，请检查语法';
@@ -720,7 +899,81 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       // 模拟API调用
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      console.log('创建任务:', formData);
+      // 构造提交payload：包含多数据集，保持向后兼容的字段
+      const firstDs = formData.selectedDatasets[0];
+      const payload = {
+        ...formData,
+        datasets: formData.selectedDatasets,
+        datasetName: firstDs ? firstDs.name : (formData.selectedDataset?.name || formData.datasetName),
+        datasetVersion: firstDs ? firstDs.version : formData.datasetVersion,
+      };
+
+      // 生成下一个任务ID（基于现有ID的最大序号 + 1）
+      const nextIdNumber = (() => {
+        const nums = tasks
+          .map(t => {
+            const m = t.id.match(/^TASK-(\d{3,})$/);
+            return m ? parseInt(m[1], 10) : 0;
+          })
+          .filter(n => !isNaN(n));
+        const max = nums.length > 0 ? Math.max(...nums) : 0;
+        return max + 1;
+      })();
+      const nextId = `TASK-${String(nextIdNumber).padStart(3, '0')}`;
+
+      // 将表单数据映射为 Task 类型，并追加到任务列表
+      const nowIso = new Date().toISOString();
+      const newTask: Task = {
+        id: nextId,
+        taskName: formData.taskName,
+        taskType: formData.taskType,
+        projectId: formData.projectId,
+        projectName: getProjectName(formData.projectId),
+        datasetName: payload.datasetName || '',
+        datasetVersion: payload.datasetVersion || '',
+        datasets: formData.selectedDatasets.length > 0 ? formData.selectedDatasets : undefined,
+        modelName: formData.modelSelectionMode === 'single'
+          ? formData.modelName
+          : (formData.models.length > 0
+              ? `${formData.models[0]} 等 ${formData.models.length} 个模型`
+              : '未选择模型'),
+        priority: formData.priority,
+        status: 'pending',
+        progress: 0,
+        createdAt: nowIso,
+        createdBy: '当前用户',
+        description: formData.description,
+        estimatedTime: formData.resourceConfig?.maxRunTime || undefined,
+        config: formData.hyperparameterMode === 'json' 
+          ? formData.manualConfig 
+          : (() => {
+              const base: any = { mode: 'page', taskType: formData.taskType };
+              if (formData.taskType === 'forecasting') {
+                base.forecasting = { ...formData.forecastingConfig };
+              } else if (formData.taskType === 'classification') {
+                base.classification = { ...formData.classificationConfig };
+              } else if (formData.taskType === 'regression') {
+                base.regression = { ...formData.regressionConfig };
+              }
+              return base;
+            })(),
+      };
+
+      setTasks(prev => [newTask, ...prev]);
+      console.log('创建任务:', newTask);
+      // 创建成功后：切换到表格视图，并高亮新任务（选中复选框）
+      setViewMode('table');
+      setSelectedTaskIds([newTask.id]);
+      setHighlightTaskId(newTask.id);
+      // 创建成功后：按需求保持在任务列表，不自动打开详情
+      // 如果需要恢复为自动打开详情，可将 autoOpenDetailAfterCreate 置为 true
+      if (autoOpenDetailAfterCreate) {
+        if (onOpenTaskDetailFullPage) {
+          onOpenTaskDetailFullPage(newTask);
+        } else {
+          setSelectedTaskForDetails(newTask);
+        }
+      }
       
       // 成功后关闭对话框
       setIsCreateTaskOpen(false);
@@ -736,6 +989,90 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  // 编辑任务保存
+  const handleSaveEditTask = async () => {
+    if (!editingTask) return;
+    if (!validateForm()) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // 模拟API调用
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      const firstDs = formData.selectedDatasets[0];
+      const payload = {
+        ...formData,
+        datasets: formData.selectedDatasets,
+        datasetName: firstDs ? firstDs.name : (formData.selectedDataset?.name || formData.datasetName),
+        datasetVersion: firstDs ? firstDs.version : formData.datasetVersion,
+      };
+
+      setTasks(prev => prev.map(t => {
+        if (t.id !== editingTask.id) return t;
+        return {
+          ...t,
+          taskName: formData.taskName,
+          taskType: formData.taskType,
+          projectId: formData.projectId,
+          projectName: getProjectName(formData.projectId),
+          datasetName: payload.datasetName || t.datasetName,
+          datasetVersion: payload.datasetVersion || t.datasetVersion,
+          datasets: formData.selectedDatasets.length > 0 ? formData.selectedDatasets : undefined,
+          modelName: formData.modelSelectionMode === 'single'
+            ? formData.modelName
+            : (formData.models.length > 0
+                ? `${formData.models[0]} 等 ${formData.models.length} 个模型`
+                : t.modelName),
+          priority: formData.priority,
+          description: formData.description,
+          // 保持状态、进度不变，仅更新配置
+          config: formData.hyperparameterMode === 'json' 
+            ? formData.manualConfig 
+            : (() => {
+                const base: any = { mode: 'page', taskType: formData.taskType };
+                if (formData.taskType === 'forecasting') {
+                  base.forecasting = { ...formData.forecastingConfig };
+                } else if (formData.taskType === 'classification') {
+                  base.classification = { ...formData.classificationConfig };
+                } else if (formData.taskType === 'regression') {
+                  base.regression = { ...formData.regressionConfig };
+                }
+                return base;
+              })(),
+        };
+      }));
+
+      // 关闭弹窗与编辑模式
+      setIsCreateTaskOpen(false);
+      setIsEditMode(false);
+      setEditingTask(null);
+      // 高亮修改的任务
+      setViewMode('table');
+      setSelectedTaskIds([editingTask.id]);
+      setHighlightTaskId(editingTask.id);
+    } catch (error) {
+      console.error('保存编辑失败:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 当需要高亮某个任务时，滚动至该任务所在行，并在几秒后自动移除高亮效果
+  useEffect(() => {
+    if (!highlightTaskId) return;
+    // 仅当当前是表格视图时，滚动定位到高亮任务
+    if (viewMode === 'table') {
+      const el = document.getElementById(`task-row-${highlightTaskId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+    // 高亮保持，直到用户手动修改选择或再次创建任务
+    return () => {};
+  }, [highlightTaskId, viewMode]);
 
   // 处理任务选择
   const handleTaskSelection = (taskId: string, checked: boolean) => {
@@ -757,6 +1094,79 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // 将当前选中的数据集 + 版本加入到 selectedDatasets 列表（若已存在则更新版本）
+  const addSelectedDataset = () => {
+    const current = formData.selectedDataset;
+    if (!current) {
+      setFormErrors(prev => ({ ...prev, datasetName: '请选择数据集' }));
+      return;
+    }
+    if (!formData.datasetVersion) {
+      setFormErrors(prev => ({ ...prev, datasetVersion: '请选择数据版本' }));
+      return;
+    }
+
+    setFormData(prev => {
+      const existsIdx = prev.selectedDatasets.findIndex(d => d.id === current.id);
+      let nextList = [...prev.selectedDatasets];
+      const newEntry: SelectedDatasetEntry = {
+        id: current.id,
+        name: current.name,
+        version: formData.datasetVersion
+      };
+      if (existsIdx >= 0) {
+        nextList[existsIdx] = newEntry; // 更新版本
+      } else {
+        nextList.push(newEntry);
+      }
+      return {
+        ...prev,
+        selectedDatasets: nextList
+      };
+    });
+    // 清理相关错误
+    setFormErrors(prev => {
+      const { datasetName, datasetVersion, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  // 从 selectedDatasets 列表移除指定数据集
+  const removeSelectedDataset = (datasetId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedDatasets: prev.selectedDatasets.filter(d => d.id !== datasetId)
+    }));
+  };
+
+  // 直接在“已选数据集列表”中更新某条目的版本
+  const updateSelectedDatasetVersion = (datasetId: string, newVersion: string) => {
+    setFormData(prev => {
+      const nextList = prev.selectedDatasets.map(d => 
+        d.id === datasetId ? { ...d, version: newVersion } : d
+      );
+      const next: typeof prev = { ...prev, selectedDatasets: nextList };
+      // 如果当前上方选择器正好是这个数据集，则同步更新其版本选择
+      if (prev.selectedDataset?.id === datasetId) {
+        next.datasetVersion = newVersion;
+      }
+      return next;
+    });
+  };
+
+  // 点击某个已选条目后回填到当前选择器，以便修改再更新回列表
+  const backfillSelectedDataset = (datasetId: string) => {
+    const ds = availableDatasets.find(d => d.id === datasetId);
+    const sd = formData.selectedDatasets.find(d => d.id === datasetId);
+    if (!ds) return;
+    setFormData(prev => ({
+      ...prev,
+      datasetName: ds.id, // 注意：选择器使用的是数据集ID
+      selectedDataset: ds,
+      datasetVersion: sd?.version || (ds.versions?.[0]?.version ?? '')
+    }));
+  };
+
   // 处理筛选条件变化
   const handleFilterChange = (field: keyof FilterOptions, value: any) => {
     setFilters(prev => ({ ...prev, [field]: value }));
@@ -767,6 +1177,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     setFilters({
       taskType: 'all',
       status: 'all',
+      projectId: 'all',
       datasetName: '',
       modelName: '',
       priority: 'all',
@@ -790,6 +1201,82 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       }
       return;
     }
+
+    // 处理编辑任务操作（支持失败任务等状态）
+    if (action.trim() === 'edit') {
+      // 预填创建表单为编辑模式
+      const matchedProjectId = task.projectId || (mockProjects.find(p => p.name === task.projectName)?.id ?? '');
+      // 通过数据集名称匹配ID
+      const matchedDataset = availableDatasets.find(d => d.name === task.datasetName);
+      const availableFields = matchedDataset?.previewData && matchedDataset.previewData.length > 0
+        ? Object.keys(matchedDataset.previewData[0])
+        : [];
+      setFormData(prev => ({
+        ...prev,
+        taskName: task.taskName,
+        taskType: task.taskType,
+        projectId: matchedProjectId,
+        datasetName: matchedDataset?.id || '',
+        datasetVersion: task.datasetVersion || '',
+        selectedDataset: matchedDataset || null,
+        selectedDatasets: task.datasets ?? [],
+        modelSelectionMode: 'single',
+        modelName: task.modelName,
+        models: [],
+        targetFields: [],
+        availableFields,
+        priority: task.priority,
+        description: task.description || '',
+        config: typeof task.config === 'string' ? task.config : '',
+        hyperparameterMode: typeof task.config === 'string' ? 'json' : 'page',
+        forecastingConfig: (typeof task.config === 'object' && task.config?.forecasting)
+          ? {
+              contextLength: task.config.forecasting.contextLength ?? 24,
+              forecastLength: task.config.forecasting.forecastLength ?? 12,
+              stepLength: task.config.forecasting.stepLength ?? 1,
+              startTime: task.config.forecasting.startTime ?? '',
+              mainVariableFile: task.config.forecasting.mainVariableFile,
+              covariateFiles: task.config.forecasting.covariateFiles ?? []
+            }
+          : {
+              contextLength: 24,
+              forecastLength: 12,
+              stepLength: 1,
+              startTime: '',
+              mainVariableFile: undefined,
+              covariateFiles: []
+            },
+        classificationConfig: (typeof task.config === 'object' && task.config?.classification)
+          ? {
+              trainRatio: task.config.classification.trainRatio ?? 80,
+              testRatio: task.config.classification.testRatio ?? 20,
+              shuffle: task.config.classification.shuffle ?? false
+            }
+          : {
+              trainRatio: 80,
+              testRatio: 20,
+              shuffle: false
+            },
+        regressionConfig: (typeof task.config === 'object' && task.config?.regression)
+          ? {
+              trainRatio: task.config.regression.trainRatio ?? 80,
+              testRatio: task.config.regression.testRatio ?? 20,
+              shuffle: task.config.regression.shuffle ?? false
+            }
+          : {
+              trainRatio: 80,
+              testRatio: 20,
+              shuffle: false
+            },
+        manualConfig: typeof task.config === 'string' ? task.config : '',
+        resourceType: 'auto',
+        resourceConfig: { cores: 4, memory: 8, maxRunTime: 120 },
+      }));
+      setIsEditMode(true);
+      setEditingTask(task);
+      setIsCreateTaskOpen(true);
+      return;
+    }
     
     // 对于需要确认的操作，显示确认对话框
     if (['start', 'cancel', 'archive', 'retry'].includes(action.trim())) {
@@ -809,6 +1296,35 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
   const executeTaskAction = (action: string, taskId: string) => {
     console.log(`执行操作: ${action}, 任务ID: ${taskId}`);
     // 这里可以添加具体的操作逻辑
+    if (action === 'start') {
+      // 将任务状态更新为运行中，隐藏编辑按钮
+      setTasks(prev => prev.map(t => {
+        if (t.id !== taskId) return t;
+        return {
+          ...t,
+          status: 'running',
+          // 初始进度（模拟），确保表格显示进度条
+          progress: t.progress !== undefined ? t.progress : 5,
+        };
+      }));
+    }
+    if (action === 'pause') {
+      // 简单模拟暂停为挂起（回到待执行），以便再次“开始”
+      setTasks(prev => prev.map(t => {
+        if (t.id !== taskId) return t;
+        return {
+          ...t,
+          status: 'pending',
+        };
+      }));
+    }
+    if (action === 'cancel') {
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'cancelled' } : t));
+    }
+    if (action === 'retry') {
+      // 失败或取消的任务重试为待执行
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'pending' } : t));
+    }
     // 关闭确认对话框
     setConfirmDialog({
       isOpen: false,
@@ -839,6 +1355,10 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     const actions: Array<{ key: string; label: string; icon: any }> = [];
     
     actions.push({ key: 'view', label: '查看详情', icon: Eye });
+    // 编辑任务：确保失败任务可编辑，其他非运行中状态也可编辑
+    if (task.status === 'failed' || task.status === 'pending' || task.status === 'cancelled' || task.status === 'completed') {
+      actions.push({ key: 'edit', label: '编辑任务', icon: Pencil });
+    }
     
     if (task.status === 'failed' || task.status === 'cancelled') {
       actions.push({ key: 'retry', label: '重试', icon: RotateCcw });
@@ -950,6 +1470,156 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     warnings: ['训练阶段进行了早停']
   };
 
+  // 示例对比数据（回归任务）
+  const taskCompareRegA = {
+    info: { id: 'TR-A', name: '回归任务 A', dataset: 'HousePrice v2', model: 'XGBoostRegressor (v1.0)' },
+    type: 'regression' as const,
+    metrics: {
+      mse: 0.024,
+      rmse: 0.155,
+      mae: 0.112,
+      r2: 0.89,
+      residuals: Array.from({ length: 60 }, (_, i) => ({ x: i, y: (Math.sin(i / 5) * 0.05) - 0.02 + (Math.random() - 0.5) * 0.02 }))
+    },
+    causalGraph: {
+      nodes: [
+        { id: 'n1', label: '面积', x: 60, y: 60 },
+        { id: 'n2', label: '房龄', x: 180, y: 60 },
+        { id: 'n3', label: '价格', x: 120, y: 160 }
+      ],
+      edges: [
+        { source: 'n1', target: 'n3', influenceStrength: 0.85 },
+        { source: 'n2', target: 'n3', influenceStrength: -0.35 }
+      ]
+    },
+    phases: [
+      { name: '数据加载', durationSec: 25 },
+      { name: '训练', durationSec: 120 },
+      { name: '评估', durationSec: 30 }
+    ],
+    usage: Array.from({ length: 30 }, (_, i) => ({ t: i, cpu: 40 + Math.sin(i / 3) * 15, gpu: 0 })),
+    totalTimeSec: 175,
+    trainTimeSec: 120,
+    inferTimeMs: 25,
+    quota: { gpuMemGB: 0, cpuCores: 8, ramGB: 16, timeLimitMin: 45 },
+    actual: { gpuMemGB: 0, cpuCores: 6, ramGB: 12 },
+    warnings: ['数据标准化后效果更稳定']
+  };
+
+  const taskCompareRegB = {
+    info: { id: 'TR-B', name: '回归任务 B', dataset: 'HousePrice v2', model: 'LightGBMRegressor (v3.2)' },
+    type: 'regression' as const,
+    metrics: {
+      mse: 0.020,
+      rmse: 0.141,
+      mae: 0.105,
+      r2: 0.91,
+      residuals: Array.from({ length: 60 }, (_, i) => ({ x: i, y: (Math.cos(i / 4) * 0.04) - 0.01 + (Math.random() - 0.5) * 0.02 }))
+    },
+    causalGraph: {
+      nodes: [
+        { id: 'n1', label: '面积', x: 60, y: 60 },
+        { id: 'n2', label: '房龄', x: 180, y: 60 },
+        { id: 'n3', label: '价格', x: 120, y: 160 }
+      ],
+      edges: [
+        { source: 'n1', target: 'n3', influenceStrength: 0.80 },
+        { source: 'n2', target: 'n3', influenceStrength: -0.28 }
+      ]
+    },
+    phases: [
+      { name: '数据加载', durationSec: 22 },
+      { name: '训练', durationSec: 100 },
+      { name: '评估', durationSec: 28 }
+    ],
+    usage: Array.from({ length: 30 }, (_, i) => ({ t: i, cpu: 35 + Math.cos(i / 3) * 15, gpu: 0 })),
+    totalTimeSec: 150,
+    trainTimeSec: 100,
+    inferTimeMs: 22,
+    quota: { gpuMemGB: 0, cpuCores: 8, ramGB: 16, timeLimitMin: 45 },
+    actual: { gpuMemGB: 0, cpuCores: 6, ramGB: 12 },
+    warnings: ['模型对异常值较为敏感，建议加强鲁棒性']
+  };
+
+  // 示例对比数据（时序预测任务）
+  const forecastSeriesBase = Array.from({ length: 50 }, (_, i) => {
+    const actual = 50 + i * 0.8 + Math.sin(i / 4) * 5 + (Math.random() - 0.5) * 2;
+    return actual;
+  });
+  const taskCompareFctA = {
+    info: { id: 'TF-A', name: '时序预测任务 A', dataset: 'EnergyLoad v1', model: 'Prophet (v1.1)' },
+    type: 'forecasting' as const,
+    metrics: (() => {
+      const series = forecastSeriesBase.map((a, t) => ({ t, actual: a, predicted: a * (1 + ((Math.random() - 0.5) * 0.06)) }));
+      const errors = series.map(p => Math.abs(p.predicted - p.actual));
+      const mae = errors.reduce((s, e) => s + e, 0) / errors.length;
+      const rmse = Math.sqrt(errors.reduce((s, e) => s + e * e, 0) / errors.length);
+      const mape = series.reduce((s, p) => s + Math.abs((p.predicted - p.actual) / p.actual), 0) / series.length;
+      const residuals = series.map((p, i) => ({ x: i, y: p.predicted - p.actual }));
+      return { mae, rmse, mape, smape: mape, r2: 0.72, series, residuals };
+    })(),
+    causalGraph: {
+      nodes: [
+        { id: 'n1', label: '温度', x: 60, y: 60 },
+        { id: 'n2', label: '工作日', x: 180, y: 60 },
+        { id: 'n3', label: '负载', x: 120, y: 160 }
+      ],
+      edges: [
+        { source: 'n1', target: 'n3', influenceStrength: 0.55 },
+        { source: 'n2', target: 'n3', influenceStrength: 0.35 }
+      ]
+    },
+    phases: [
+      { name: '数据加载', durationSec: 30 },
+      { name: '训练', durationSec: 160 },
+      { name: '评估', durationSec: 35 }
+    ],
+    usage: Array.from({ length: 30 }, (_, i) => ({ t: i, cpu: 38 + Math.sin(i / 3) * 18, gpu: 0 })),
+    totalTimeSec: 225,
+    trainTimeSec: 160,
+    inferTimeMs: 30,
+    quota: { gpuMemGB: 8, cpuCores: 8, ramGB: 16, timeLimitMin: 60 },
+    actual: { gpuMemGB: 0, cpuCores: 6, ramGB: 12 },
+    warnings: ['节假日影响导致误差波动']
+  };
+
+  const taskCompareFctB = {
+    info: { id: 'TF-B', name: '时序预测任务 B', dataset: 'EnergyLoad v1', model: 'AutoTS (v0.6)' },
+    type: 'forecasting' as const,
+    metrics: (() => {
+      const series = forecastSeriesBase.map((a, t) => ({ t, actual: a, predicted: a * (1 + ((Math.random() - 0.5) * 0.04)) }));
+      const errors = series.map(p => Math.abs(p.predicted - p.actual));
+      const mae = errors.reduce((s, e) => s + e, 0) / errors.length;
+      const rmse = Math.sqrt(errors.reduce((s, e) => s + e * e, 0) / errors.length);
+      const mape = series.reduce((s, p) => s + Math.abs((p.predicted - p.actual) / p.actual), 0) / series.length;
+      const residuals = series.map((p, i) => ({ x: i, y: p.predicted - p.actual }));
+      return { mae, rmse, mape, smape: mape, r2: 0.78, series, residuals };
+    })(),
+    causalGraph: {
+      nodes: [
+        { id: 'n1', label: '温度', x: 60, y: 60 },
+        { id: 'n2', label: '工作日', x: 180, y: 60 },
+        { id: 'n3', label: '负载', x: 120, y: 160 }
+      ],
+      edges: [
+        { source: 'n1', target: 'n3', influenceStrength: 0.50 },
+        { source: 'n2', target: 'n3', influenceStrength: 0.40 }
+      ]
+    },
+    phases: [
+      { name: '数据加载', durationSec: 28 },
+      { name: '训练', durationSec: 140 },
+      { name: '评估', durationSec: 32 }
+    ],
+    usage: Array.from({ length: 30 }, (_, i) => ({ t: i, cpu: 36 + Math.cos(i / 3) * 18, gpu: 0 })),
+    totalTimeSec: 200,
+    trainTimeSec: 140,
+    inferTimeMs: 26,
+    quota: { gpuMemGB: 8, cpuCores: 8, ramGB: 16, timeLimitMin: 60 },
+    actual: { gpuMemGB: 0, cpuCores: 6, ramGB: 12 },
+    warnings: ['模型对温度的影响权重略低']
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* 操作栏 */}
@@ -964,6 +1634,18 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
             <GitCompare className="h-4 w-4" />
             <span>任务对比预览</span>
           </Button>
+
+          {/* 示例类型选择：分类/回归/时序预测 */}
+          <Select value={compareDemoType} onValueChange={(value) => setCompareDemoType(value as TaskType)}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="示例类型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="classification">分类</SelectItem>
+              <SelectItem value="regression">回归</SelectItem>
+              <SelectItem value="forecasting">时序预测</SelectItem>
+            </SelectContent>
+          </Select>
 
           <Button
             variant="outline"
@@ -998,13 +1680,17 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
             setIsCreateTaskOpen(open);
             onCreateTaskDialogChange?.(open);
             if (!open) {
+              // 重置到第1步
+              setCurrentStep(1);
               // 重置表单
               setFormData({
                 taskName: '',
-                taskType: 'prediction',
+                taskType: 'forecasting',
+                projectId: '',
                 datasetName: '',
                 datasetVersion: '',
                 selectedDataset: null,
+                selectedDatasets: [],
                 modelName: '',
                 models: [],
                 modelSelectionMode: 'multiple',
@@ -1013,10 +1699,24 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                 priority: 'medium',
                 description: '',
                 config: '',
-                hyperparameterMode: 'auto',
-                autoMLConfig: {
-                  maxTime: 60,
-                  searchSpace: 'default'
+                hyperparameterMode: 'page',
+                forecastingConfig: {
+                  contextLength: 24,
+                  forecastLength: 12,
+                  stepLength: 1,
+                  startTime: '',
+                  mainVariableFile: undefined,
+                  covariateFiles: []
+                },
+                classificationConfig: {
+                  trainRatio: 80,
+                  testRatio: 20,
+                  shuffle: false
+                },
+                regressionConfig: {
+                  trainRatio: 80,
+                  testRatio: 20,
+                  shuffle: false
                 },
                 manualConfig: '',
                 resourceType: 'auto',
@@ -1027,6 +1727,8 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                 }
               });
               setFormErrors({});
+              setIsEditMode(false);
+              setEditingTask(null);
             }
           }}>
             <DialogTrigger asChild>
@@ -1035,25 +1737,64 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                 <span>创建任务</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className={`${isFullScreen ? 'sm:max-w-[100vw] max-w-[100vw] w-[100vw] h-[96vh]' : 'sm:max-w-[1920px] max-w-[1920px] w-[98vw] max-h-[90vh]'} overflow-y-auto overflow-x-hidden`}>
               <DialogHeader>
                 <DialogTitle className="flex items-center space-x-2">
                   <Target className="h-5 w-5" />
-                  <span>创建新任务</span>
+                  <span>{isEditMode ? '编辑任务' : '创建新任务'}</span>
                 </DialogTitle>
               </DialogHeader>
+              {/* 步骤导航条 */}
+              <div className="sticky top-0 z-10 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b mb-4">
+                <div className="flex items-center justify-between px-1 py-2">
+                  <div className="flex items-center gap-2">
+                    {steps.map((s, idx) => {
+                      const isActive = currentStep === s.number;
+                      const isCompleted = currentStep > s.number;
+                      return (
+                        <button
+                          key={s.number}
+                          type="button"
+                          onClick={() => setCurrentStep(s.number)}
+                          className={`${isActive ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'} rounded-full px-3 py-1 text-sm font-medium flex items-center gap-2 transition-colors`}
+                          title={`第${s.number}步：${s.label}`}
+                        >
+                          <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full ${isActive ? 'bg-white text-blue-600' : isCompleted ? 'bg-green-600 text-white' : 'bg-gray-300 text-gray-800'}`}>{s.number}</span>
+                          <span>{s.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsFullScreen(prev => !prev)}
+                      className="ml-1"
+                      title={isFullScreen ? '退出全屏' : '全屏'}
+                    >
+                      {isFullScreen ? (
+                        <span className="inline-flex items-center gap-1"><Minimize2 className="h-4 w-4" /> 退出全屏</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1"><Maximize2 className="h-4 w-4" /> 全屏</span>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
               
               <div className="space-y-6">
-                {/* 基本信息区域 */}
+                {/* 第1步：基础信息配置 */}
+                {currentStep === 1 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center space-x-2">
                       <Settings className="h-4 w-4" />
-                      <span>基本信息</span>
+                      <span>基础信息配置</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                       <div>
                         <Label htmlFor="taskName" className="flex items-center space-x-1">
                           <span>任务名称</span>
@@ -1080,14 +1821,32 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="prediction">预测</SelectItem>
+                            <SelectItem value="forecasting">时序预测</SelectItem>
                             <SelectItem value="classification">分类</SelectItem>
-                            <SelectItem value="evaluation">评估</SelectItem>
                             <SelectItem value="regression">回归</SelectItem>
                           </SelectContent>
                         </Select>
                         {formErrors.taskType && (
                           <p className="text-sm text-red-500 mt-1">{formErrors.taskType}</p>
+                        )}
+                      </div>
+                      <div>
+                        <Label htmlFor="projectId" className="flex items-center space-x-1">
+                          <span>所属项目</span>
+                          <span className="text-red-500">*</span>
+                        </Label>
+                        <Select value={formData.projectId} onValueChange={(value) => handleInputChange('projectId', value)}>
+                          <SelectTrigger className={formErrors.projectId ? 'border-red-500' : ''}>
+                            <SelectValue placeholder="选择所属项目" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {mockProjects.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {formErrors.projectId && (
+                          <p className="text-sm text-red-500 mt-1">{formErrors.projectId}</p>
                         )}
                       </div>
                     </div>
@@ -1102,15 +1861,130 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                         rows={3}
                       />
                     </div>
+
+                    {/* 运行配置（整合至基础信息配置） */}
+                    <div className="space-y-4 pt-2 border-t border-gray-200">
+                      <div className="flex items-center space-x-2">
+                        <Cpu className="h-4 w-4" />
+                        <span className="font-medium text-gray-900">运行配置</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="flex items-center space-x-1">
+                            <span>资源类型</span>
+                            <span className="text-red-500">*</span>
+                          </Label>
+                          <Select value={formData.resourceType} onValueChange={(value) => handleInputChange('resourceType', value)}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="auto">自动分配</SelectItem>
+                              <SelectItem value="cpu">CPU</SelectItem>
+                              <SelectItem value="gpu">GPU</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="priority" className="flex items-center space-x-1">
+                            <span>任务优先级</span>
+                            <span className="text-red-500">*</span>
+                          </Label>
+                          <Select value={formData.priority} onValueChange={(value) => handleInputChange('priority', value)}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="low">
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                  <span>低 - 空闲时执行</span>
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="medium">
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                                  <span>中 - 按时间顺序执行</span>
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="high">
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                                  <span>高 - 插队执行</span>
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="urgent">
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                  <span>紧急 - 立即执行</span>
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {formData.resourceType !== 'auto' && (
+                        <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
+                          <h4 className="font-medium">资源配额设置</h4>
+                          <div className="grid grid-cols-3 gap-4">
+                            <div>
+                              <Label htmlFor="cores">CPU核心数</Label>
+                              <Input
+                                id="cores"
+                                type="number"
+                                value={formData.resourceConfig.cores}
+                                onChange={(e) => handleInputChange('resourceConfig', {
+                                  ...formData.resourceConfig,
+                                  cores: parseInt(e.target.value) || 4
+                                })}
+                                min="1"
+                                max="32"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="memory">内存 (GB)</Label>
+                              <Input
+                                id="memory"
+                                type="number"
+                                value={formData.resourceConfig.memory}
+                                onChange={(e) => handleInputChange('resourceConfig', {
+                                  ...formData.resourceConfig,
+                                  memory: parseInt(e.target.value) || 8
+                                })}
+                                min="1"
+                                max="128"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="maxRunTime">最大运行时长 (分钟)</Label>
+                              <Input
+                                id="maxRunTime"
+                                type="number"
+                                value={formData.resourceConfig.maxRunTime}
+                                onChange={(e) => handleInputChange('resourceConfig', {
+                                  ...formData.resourceConfig,
+                                  maxRunTime: parseInt(e.target.value) || 120
+                                })}
+                                min="1"
+                                max="2880"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
+                )}
 
-                {/* 数据配置区域 */}
+                {/* 第2步：数据与目标 */}
+                {currentStep === 2 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center space-x-2">
                       <Database className="h-4 w-4" />
-                      <span>数据配置</span>
+                      <span>数据与目标</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-6">
@@ -1181,20 +2055,30 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                             </Button>
                           </div>
                           
+                          {/* 优先显示所选版本的统计信息，未选择版本时显示数据集默认统计 */}
                           <div className="grid grid-cols-3 gap-4 text-sm">
                             <div>
                               <span className="text-gray-500">记录数：</span>
-                              <span className="font-medium">{formData.selectedDataset.sampleCount.toLocaleString()}</span>
+                              <span className="font-medium">{(
+                                (formData.selectedDataset.versions.find(v => v.version === formData.datasetVersion)?.sampleCount ?? formData.selectedDataset.sampleCount)
+                              ).toLocaleString()}</span>
                             </div>
                             <div>
                               <span className="text-gray-500">字段数：</span>
-                              <span className="font-medium">{formData.selectedDataset.fieldCount}</span>
+                              <span className="font-medium">{
+                                formData.selectedDataset.versions.find(v => v.version === formData.datasetVersion)?.fieldCount ?? formData.selectedDataset.fieldCount
+                              }</span>
                             </div>
                             <div>
                               <span className="text-gray-500">大小：</span>
-                              <span className="font-medium">{formData.selectedDataset.size}</span>
+                              <span className="font-medium">{
+                                formData.selectedDataset.versions.find(v => v.version === formData.datasetVersion)?.size ?? formData.selectedDataset.size
+                              }</span>
                             </div>
                           </div>
+                          {formData.datasetVersion && (
+                            <div className="text-xs text-gray-500">当前版本：{formData.datasetVersion}（{formData.selectedDataset.versions.find(v => v.version === formData.datasetVersion)?.createdAt}）</div>
+                          )}
                           
                           <p className="text-sm text-gray-600">{formData.selectedDataset.description}</p>
                           
@@ -1265,8 +2149,72 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                         {formErrors.datasetVersion && (
                           <p className="text-sm text-red-500 mt-1">{formErrors.datasetVersion}</p>
                         )}
+                        {/* 添加到已选数据集列表 */}
+                        <div className="mt-3">
+                          <Button type="button" variant="outline" size="sm" onClick={addSelectedDataset} disabled={!formData.datasetName || !formData.datasetVersion}>
+                            添加/更新至列表
+                          </Button>
+                          <p className="text-xs text-gray-500 mt-1">可添加多个数据集进行联合训练。</p>
+                        </div>
                       </div>
                     </div>
+
+                    {/* 已选择的数据集列表（多选） */}
+                    {formData.selectedDatasets.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-gray-700">已选择的数据集</div>
+                        <div className="flex flex-wrap gap-2">
+                          {formData.selectedDatasets.map((ds) => {
+                            const versions = availableDatasets.find(d => d.id === ds.id)?.versions ?? [];
+                            return (
+                              <div key={ds.id} className="flex items-center gap-2 bg-gray-100 rounded-md px-2 py-1">
+                                <button
+                                  type="button"
+                                  className="text-sm font-medium hover:text-blue-600"
+                                  title="点击回填到上方选择器以修改版本"
+                                  onClick={() => backfillSelectedDataset(ds.id)}
+                                >
+                                  {ds.name}
+                                </button>
+                                <Select
+                                  value={ds.version}
+                                  onValueChange={(value) => updateSelectedDatasetVersion(ds.id, value)}
+                                >
+                                  <SelectTrigger className="h-7 text-xs w-28 bg-transparent border-none shadow-none px-1 focus:ring-0">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {versions.map(v => (
+                                      <SelectItem key={v.version} value={v.version}>
+                                        <div className="flex flex-col items-start w-full">
+                                          <div className="flex items-center justify-between w-full">
+                                            <span className="font-medium">{v.version}</span>
+                                            <span className="text-xs text-gray-500 ml-2">{v.createdAt}</span>
+                                          </div>
+                                          <div className="text-xs text-gray-500 mt-1">
+                                            {v.sampleCount.toLocaleString()} 条记录 • {v.fieldCount} 个字段 • {v.size}
+                                          </div>
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs px-2"
+                                  onClick={() => removeSelectedDataset(ds.id)}
+                                >
+                                  移除
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-gray-500">提示：点击数据集名称可回填到上方选择器；右侧下拉可直接修改版本。</p>
+                      </div>
+                    )}
 
                     {/* 目标字段配置 */}
                     <div>
@@ -1380,7 +2328,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                       ) : (
                         <div className="border rounded-lg p-4 bg-gray-50 text-center text-gray-500">
                           <Target className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                          <p className="text-sm">请先选择数据集以查看可用字段</p>
+                          <p className="text-sm">请先添加至少一个数据集以查看可用字段</p>
                         </div>
                       )}
                       
@@ -1393,13 +2341,15 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                     </div>
                   </CardContent>
                 </Card>
+                )}
 
-                {/* 模型配置区域 */}
+                {/* 第3步：模型选择 */}
+                {currentStep === 3 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center space-x-2">
                       <Activity className="h-4 w-4" />
-                      <span>模型配置</span>
+                      <span>模型选择</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -1592,13 +2542,15 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                     </div>
                   </CardContent>
                 </Card>
+                )}
 
-                {/* 超参数配置区域 */}
+                {/* 第4步：参数配置 */}
+                {currentStep === 4 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center space-x-2">
                       <Settings className="h-4 w-4" />
-                      <span>超参数配置</span>
+                      <span>参数配置</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -1606,87 +2558,267 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                       <Label className="text-sm font-medium">配置模式</Label>
                       <RadioGroup
                         value={formData.hyperparameterMode}
-                        onValueChange={(value: 'auto' | 'manual') => handleInputChange('hyperparameterMode', value)}
+                        onValueChange={(value: 'page' | 'json') => handleInputChange('hyperparameterMode', value)}
                         className="flex space-x-6 mt-2"
                       >
                         <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="auto" id="auto-mode" />
-                          <Label htmlFor="auto-mode" className="text-sm">自动搜参 (AutoML)</Label>
+                          <RadioGroupItem value="page" id="page-mode" />
+                          <Label htmlFor="page-mode" className="text-sm">页面配置</Label>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="manual" id="manual-mode" />
-                          <Label htmlFor="manual-mode" className="text-sm">手动配置</Label>
+                          <RadioGroupItem value="json" id="json-mode" />
+                          <Label htmlFor="json-mode" className="text-sm">JSON配置</Label>
                         </div>
                       </RadioGroup>
                       <p className="text-sm text-gray-500 mt-2">
-                        {formData.hyperparameterMode === 'auto' 
-                          ? '系统自动搜索最优超参数组合，适合快速实验' 
-                          : '手动指定超参数，适合精细调优'
+                        {formData.hyperparameterMode === 'page' 
+                          ? '通过页面表单配置常见任务参数，简单直观' 
+                          : '直接粘贴/编辑JSON配置，适合精细调优或批量迁移'
                         }
                       </p>
                     </div>
-
-                    {formData.hyperparameterMode === 'auto' ? (
+                    {formData.hyperparameterMode === 'page' ? (
                       <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
                         <div className="flex items-center space-x-2 text-blue-700">
                           <Settings className="h-4 w-4" />
-                          <span className="font-medium">AutoML 配置</span>
+                          <span className="font-medium">页面配置</span>
                         </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="maxTime" className="flex items-center space-x-1">
-                              <span>最大搜索时间</span>
-                              <span className="text-red-500">*</span>
-                            </Label>
-                            <div className="flex items-center space-x-2 mt-1">
-                              <Input
-                                id="maxTime"
-                                type="number"
-                                value={formData.autoMLConfig.maxTime}
-                                onChange={(e) => handleInputChange('autoMLConfig', {
-                                  ...formData.autoMLConfig,
-                                  maxTime: parseInt(e.target.value) || 60
-                                })}
-                                min="5"
-                                max="1440"
-                                className="w-24"
-                              />
-                              <span className="text-sm text-gray-600">分钟</span>
+
+                        {formData.taskType === 'forecasting' && (
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label htmlFor="contextLength" className="flex items-center space-x-1">
+                                  <span>上下文长度</span>
+                                  <span className="text-red-500">*</span>
+                                </Label>
+                                <Input
+                                  id="contextLength"
+                                  type="number"
+                                  value={formData.forecastingConfig.contextLength}
+                                  onChange={(e) => handleInputChange('forecastingConfig', {
+                                    ...formData.forecastingConfig,
+                                    contextLength: parseInt(e.target.value) || 0
+                                  })}
+                                  min="1"
+                                  max="10000"
+                                />
+                                {formErrors.forecastingContextLength && (
+                                  <p className="text-xs text-red-500 mt-1">{formErrors.forecastingContextLength}</p>
+                                )}
+                              </div>
+                              <div>
+                                <Label htmlFor="forecastLength" className="flex items-center space-x-1">
+                                  <span>预测长度</span>
+                                  <span className="text-red-500">*</span>
+                                </Label>
+                                <Input
+                                  id="forecastLength"
+                                  type="number"
+                                  value={formData.forecastingConfig.forecastLength}
+                                  onChange={(e) => handleInputChange('forecastingConfig', {
+                                    ...formData.forecastingConfig,
+                                    forecastLength: parseInt(e.target.value) || 0
+                                  })}
+                                  min="1"
+                                  max="10000"
+                                />
+                                {formErrors.forecastingForecastLength && (
+                                  <p className="text-xs text-red-500 mt-1">{formErrors.forecastingForecastLength}</p>
+                                )}
+                              </div>
+                              <div>
+                                <Label htmlFor="stepLength" className="flex items-center space-x-1">
+                                  <span>预测步长</span>
+                                  <span className="text-red-500">*</span>
+                                </Label>
+                                <Input
+                                  id="stepLength"
+                                  type="number"
+                                  value={formData.forecastingConfig.stepLength}
+                                  onChange={(e) => handleInputChange('forecastingConfig', {
+                                    ...formData.forecastingConfig,
+                                    stepLength: parseInt(e.target.value) || 0
+                                  })}
+                                  min="1"
+                                  max="10000"
+                                />
+                                {formErrors.forecastingStepLength && (
+                                  <p className="text-xs text-red-500 mt-1">{formErrors.forecastingStepLength}</p>
+                                )}
+                              </div>
+                              <div>
+                                <Label htmlFor="startTime" className="flex items-center space-x-1">
+                                  <span>预测开始时间</span>
+                                  <span className="text-red-500">*</span>
+                                </Label>
+                                <Input
+                                  id="startTime"
+                                  type="datetime-local"
+                                  value={formData.forecastingConfig.startTime}
+                                  onChange={(e) => handleInputChange('forecastingConfig', {
+                                    ...formData.forecastingConfig,
+                                    startTime: e.target.value
+                                  })}
+                                />
+                                {formErrors.forecastingStartTime && (
+                                  <p className="text-xs text-red-500 mt-1">{formErrors.forecastingStartTime}</p>
+                                )}
+                              </div>
                             </div>
-                            <p className="text-xs text-gray-500 mt-1">
-                              建议: 5-60分钟
-                            </p>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label htmlFor="mainVariableFile">主变量文件(可选)</Label>
+                                <Input
+                                  id="mainVariableFile"
+                                  type="text"
+                                  value={formData.forecastingConfig.mainVariableFile || ''}
+                                  onChange={(e) => handleInputChange('forecastingConfig', {
+                                    ...formData.forecastingConfig,
+                                    mainVariableFile: e.target.value || undefined
+                                  })}
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="covariateFiles">协变量文件(逗号分隔)</Label>
+                                <Input
+                                  id="covariateFiles"
+                                  type="text"
+                                  value={formData.forecastingConfig.covariateFiles.join(',')}
+                                  onChange={(e) => handleInputChange('forecastingConfig', {
+                                    ...formData.forecastingConfig,
+                                    covariateFiles: e.target.value
+                                      .split(',')
+                                      .map(s => s.trim())
+                                      .filter(Boolean)
+                                  })}
+                                />
+                              </div>
+                            </div>
                           </div>
-                          
-                          <div>
-                            <Label htmlFor="searchSpace">搜索空间</Label>
-                            <Select 
-                              value={formData.autoMLConfig.searchSpace} 
-                              onValueChange={(value) => handleInputChange('autoMLConfig', {
-                                ...formData.autoMLConfig,
-                                searchSpace: value
-                              })}
-                            >
-                              <SelectTrigger className="mt-1">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="default">默认搜索空间</SelectItem>
-                                <SelectItem value="light">轻量搜索空间</SelectItem>
-                                <SelectItem value="extensive">扩展搜索空间</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-gray-500 mt-1">
-                              搜索空间越大，找到更优参数的可能性越高
-                            </p>
+                        )}
+
+                        {formData.taskType === 'classification' && (
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label htmlFor="class-train">训练集比例(%)</Label>
+                                <Input
+                                  id="class-train"
+                                  type="number"
+                                  value={formData.classificationConfig.trainRatio}
+                                  onChange={(e) => {
+                                    const train = parseInt(e.target.value) || 0;
+                                    const test = 100 - train;
+                                    handleInputChange('classificationConfig', {
+                                      ...formData.classificationConfig,
+                                      trainRatio: train,
+                                      testRatio: test < 0 ? 0 : test
+                                    });
+                                  }}
+                                  min="1"
+                                  max="99"
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="class-test">测试集比例(%)</Label>
+                                <Input
+                                  id="class-test"
+                                  type="number"
+                                  value={formData.classificationConfig.testRatio}
+                                  onChange={(e) => {
+                                    const test = parseInt(e.target.value) || 0;
+                                    const train = 100 - test;
+                                    handleInputChange('classificationConfig', {
+                                      ...formData.classificationConfig,
+                                      testRatio: test,
+                                      trainRatio: train < 0 ? 0 : train
+                                    });
+                                  }}
+                                  min="1"
+                                  max="99"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Checkbox
+                                id="class-shuffle"
+                                checked={formData.classificationConfig.shuffle}
+                                onCheckedChange={(checked) => handleInputChange('classificationConfig', {
+                                  ...formData.classificationConfig,
+                                  shuffle: Boolean(checked)
+                                })}
+                              />
+                              <Label htmlFor="class-shuffle">洗牌(Shuffle)</Label>
+                            </div>
+                            {formErrors.classificationSplit && (
+                              <p className="text-xs text-red-500 mt-1">{formErrors.classificationSplit}</p>
+                            )}
                           </div>
-                        </div>
-                        
+                        )}
+
+                        {formData.taskType === 'regression' && (
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label htmlFor="reg-train">训练集比例(%)</Label>
+                                <Input
+                                  id="reg-train"
+                                  type="number"
+                                  value={formData.regressionConfig.trainRatio}
+                                  onChange={(e) => {
+                                    const train = parseInt(e.target.value) || 0;
+                                    const test = 100 - train;
+                                    handleInputChange('regressionConfig', {
+                                      ...formData.regressionConfig,
+                                      trainRatio: train,
+                                      testRatio: test < 0 ? 0 : test
+                                    });
+                                  }}
+                                  min="1"
+                                  max="99"
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="reg-test">测试集比例(%)</Label>
+                                <Input
+                                  id="reg-test"
+                                  type="number"
+                                  value={formData.regressionConfig.testRatio}
+                                  onChange={(e) => {
+                                    const test = parseInt(e.target.value) || 0;
+                                    const train = 100 - test;
+                                    handleInputChange('regressionConfig', {
+                                      ...formData.regressionConfig,
+                                      testRatio: test,
+                                      trainRatio: train < 0 ? 0 : train
+                                    });
+                                  }}
+                                  min="1"
+                                  max="99"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Checkbox
+                                id="reg-shuffle"
+                                checked={formData.regressionConfig.shuffle}
+                                onCheckedChange={(checked) => handleInputChange('regressionConfig', {
+                                  ...formData.regressionConfig,
+                                  shuffle: Boolean(checked)
+                                })}
+                              />
+                              <Label htmlFor="reg-shuffle">洗牌(Shuffle)</Label>
+                            </div>
+                            {formErrors.regressionSplit && (
+                              <p className="text-xs text-red-500 mt-1">{formErrors.regressionSplit}</p>
+                            )}
+                          </div>
+                        )}
+
                         <div className="bg-blue-100 p-3 rounded border border-blue-200">
                           <p className="text-sm text-blue-800">
-                            <strong>AutoML 说明:</strong> 系统将自动尝试不同的超参数组合，并根据验证集性能选择最优配置。
-                            搜索过程中会显示实时进度和当前最佳结果。
+                            <strong>页面配置说明:</strong> 针对不同任务类型提供常用参数项。若需要更复杂的配置，请切换到 JSON 模式。
                           </p>
                         </div>
                       </div>
@@ -1694,12 +2826,12 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                       <div className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <div className="flex items-center space-x-2 text-gray-700">
                           <Settings className="h-4 w-4" />
-                          <span className="font-medium">手动配置</span>
+                          <span className="font-medium">JSON配置</span>
                         </div>
                         
                         <div>
                           <Label htmlFor="manualConfig" className="flex items-center space-x-1">
-                            <span>超参数配置 (JSON格式)</span>
+                        <span>参数配置 (JSON格式)</span>
                             <span className="text-red-500">*</span>
                           </Label>
                           <Textarea
@@ -1719,7 +2851,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                           <div className="flex items-start space-x-2 mt-2">
                             <div className="flex-1">
                               <p className="text-sm text-gray-600">
-                                请输入有效的JSON格式超参数配置。系统会进行格式校验和参数范围检查。
+                        请输入有效的JSON格式参数配置。系统会进行格式校验和参数范围检查。
                               </p>
                             </div>
                             <Button 
@@ -1743,157 +2875,65 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                         
                         <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
                           <p className="text-sm text-yellow-800">
-                            <strong>提示:</strong> 不同模型支持的超参数可能不同。请参考模型文档确保参数名称和取值范围正确。
+                        <strong>提示:</strong> 不同模型支持的参数可能不同。请参考模型文档确保参数名称和取值范围正确。
                           </p>
                         </div>
                       </div>
                     )}
                   </CardContent>
                 </Card>
+                )}
 
-                {/* 运行配置区域 */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center space-x-2">
-                      <Cpu className="h-4 w-4" />
-                      <span>运行配置</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label className="flex items-center space-x-1">
-                          <span>资源类型</span>
-                          <span className="text-red-500">*</span>
-                        </Label>
-                        <Select value={formData.resourceType} onValueChange={(value) => handleInputChange('resourceType', value)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="auto">自动分配</SelectItem>
-                            <SelectItem value="cpu">CPU</SelectItem>
-                            <SelectItem value="gpu">GPU</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="priority" className="flex items-center space-x-1">
-                          <span>任务优先级</span>
-                          <span className="text-red-500">*</span>
-                        </Label>
-                        <Select value={formData.priority} onValueChange={(value) => handleInputChange('priority', value)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="low">
-                              <div className="flex items-center space-x-2">
-                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                                <span>低 - 空闲时执行</span>
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="medium">
-                              <div className="flex items-center space-x-2">
-                                <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                                <span>中 - 按时间顺序执行</span>
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="high">
-                              <div className="flex items-center space-x-2">
-                                <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                                <span>高 - 插队执行</span>
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="urgent">
-                              <div className="flex items-center space-x-2">
-                                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                <span>紧急 - 立即执行</span>
-                              </div>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+                {/* 删除：第4步运行资源配置（已合并到第1步） */}
 
-                    {formData.resourceType !== 'auto' && (
-                      <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
-                        <h4 className="font-medium">资源配额设置</h4>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div>
-                            <Label htmlFor="cores">CPU核心数</Label>
-                            <Input
-                              id="cores"
-                              type="number"
-                              value={formData.resourceConfig.cores}
-                              onChange={(e) => handleInputChange('resourceConfig', {
-                                ...formData.resourceConfig,
-                                cores: parseInt(e.target.value) || 4
-                              })}
-                              min="1"
-                              max="32"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="memory">内存 (GB)</Label>
-                            <Input
-                              id="memory"
-                              type="number"
-                              value={formData.resourceConfig.memory}
-                              onChange={(e) => handleInputChange('resourceConfig', {
-                                ...formData.resourceConfig,
-                                memory: parseInt(e.target.value) || 8
-                              })}
-                              min="1"
-                              max="128"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="maxRunTime">最大运行时长 (分钟)</Label>
-                            <Input
-                              id="maxRunTime"
-                              type="number"
-                              value={formData.resourceConfig.maxRunTime}
-                              onChange={(e) => handleInputChange('resourceConfig', {
-                                ...formData.resourceConfig,
-                                maxRunTime: parseInt(e.target.value) || 120
-                              })}
-                              min="1"
-                              max="2880"
-                            />
-                          </div>
-                        </div>
-                      </div>
+                {/* 底部操作按钮（按步骤显示） */}
+                <div className="flex justify-between items-center pt-4 border-t">
+                  <div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setIsCreateTaskOpen(false)}
+                      disabled={isSubmitting}
+                    >
+                      取消
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {currentStep > 1 && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))}
+                        disabled={isSubmitting}
+                      >
+                        上一步
+                      </Button>
                     )}
-                  </CardContent>
-                </Card>
-
-                {/* 操作按钮 */}
-                <div className="flex justify-end space-x-3 pt-4 border-t">
-                  <Button 
-                    variant="outline" 
-                    onClick={() => setIsCreateTaskOpen(false)}
-                    disabled={isSubmitting}
-                  >
-                    取消
-                  </Button>
-                  <Button 
-                    onClick={handleCreateTask}
-                    disabled={isSubmitting}
-                    className="flex items-center space-x-2"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>创建中...</span>
-                      </>
+                    {currentStep < 4 ? (
+                      <Button 
+                        onClick={() => setCurrentStep(prev => Math.min(4, prev + 1))}
+                        disabled={isSubmitting}
+                      >
+                        下一步
+                      </Button>
                     ) : (
-                      <>
-                        <Plus className="h-4 w-4" />
-                        <span>创建任务</span>
-                      </>
+                      <Button 
+                        onClick={isEditMode ? handleSaveEditTask : handleCreateTask}
+                        disabled={isSubmitting}
+                        className="flex items-center space-x-2"
+                      >
+                        {isSubmitting ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <span>{isEditMode ? '保存中...' : '创建中...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            {isEditMode ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                            <span>{isEditMode ? '保存修改' : '创建任务'}</span>
+                          </>
+                        )}
+                      </Button>
                     )}
-                  </Button>
+                  </div>
                 </div>
               </div>
             </DialogContent>
@@ -1903,15 +2943,15 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
 
       {/* 任务对比预览弹窗 */}
       <Dialog open={isCompareDemoOpen} onOpenChange={setIsCompareDemoOpen}>
-        <DialogContent className="sm:max-w-6xl max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="sm:max-w-[1600px] max-w-[1600px] w-[98vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <GitCompare className="h-5 w-5" /> 任务对比预览
             </DialogTitle>
           </DialogHeader>
           <TaskCompare
-            task1={taskCompareDemoA}
-            task2={taskCompareDemoB}
+            task1={compareDemoType === 'classification' ? taskCompareDemoA : (compareDemoType === 'regression' ? taskCompareRegA : taskCompareFctA)}
+            task2={compareDemoType === 'classification' ? taskCompareDemoB : (compareDemoType === 'regression' ? taskCompareRegB : taskCompareFctB)}
             onBack={() => setIsCompareDemoOpen(false)}
           />
         </DialogContent>
@@ -1942,9 +2982,8 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">全部类型</SelectItem>
-                    <SelectItem value="prediction">预测</SelectItem>
+                    <SelectItem value="forecasting">时序预测</SelectItem>
                     <SelectItem value="classification">分类</SelectItem>
-                    <SelectItem value="evaluation">评估</SelectItem>
                     <SelectItem value="regression">回归</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1964,6 +3003,21 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                     <SelectItem value="failed">失败</SelectItem>
                     <SelectItem value="cancelled">已取消</SelectItem>
                     <SelectItem value="archived">已归档</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>所属项目</Label>
+                <Select value={filters.projectId ?? 'all'} onValueChange={(value) => handleFilterChange('projectId', value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部项目</SelectItem>
+                    {mockProjects.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -2183,6 +3237,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                     </TableHead>
                     <TableHead>任务ID</TableHead>
                     <TableHead>任务类型</TableHead>
+                    <TableHead>所属项目</TableHead>
                     <TableHead>数据集</TableHead>
                     <TableHead>模型</TableHead>
                     <TableHead 
@@ -2230,7 +3285,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                       </div>
                     </TableHead>
                     <TableHead>创建者</TableHead>
-                    <TableHead>操作</TableHead>
+                    <TableHead className="sticky right-0 bg-white z-30 border-l w-[220px]">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2238,9 +3293,14 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                     const statusConfig = getStatusConfig(task.status);
                     const priorityConfig = getPriorityConfig(task.priority);
                     const StatusIcon = statusConfig.icon;
+                    const isHighlighted = task.id === highlightTaskId;
                     
                     return (
-                      <TableRow key={task.id} className="hover:bg-gray-50">
+                      <TableRow
+                        key={task.id}
+                        id={`task-row-${task.id}`}
+                        className={`hover:bg-gray-50 ${isHighlighted ? 'bg-amber-50 ring-2 ring-amber-200' : ''}`}
+                      >
                         <TableCell>
                           <Checkbox
                             checked={selectedTaskIds.includes(task.id)}
@@ -2268,10 +3328,42 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <div>
-                            <div className="font-medium">{task.datasetName}</div>
-                            <div className="text-sm text-gray-500">{task.datasetVersion}</div>
-                          </div>
+                          {task.projectId || task.projectName ? (
+                            <Badge variant="secondary" className="bg-purple-50">
+                              {task.projectName ?? (task.projectId ? getProjectName(task.projectId) : '未选择项目')}
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-500">未选择项目</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {task.datasets && task.datasets.length > 0 ? (
+                            <div>
+                              <div className="font-medium flex flex-wrap gap-2">
+                                {task.datasets.slice(0, 3).map((ds) => (
+                                  <Badge key={ds.id} variant="secondary">
+                                    {ds.name}
+                                  </Badge>
+                                ))}
+                                {task.datasets.length > 3 && (
+                                  <span className="text-xs text-gray-500">+{task.datasets.length - 3} 更多</span>
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {task.datasets.slice(0, 1).map((ds) => (
+                                  <span key={ds.id}>{ds.version}</span>
+                                ))}
+                                {task.datasets.length > 1 && (
+                                  <span className="ml-1">等 {task.datasets.length} 个数据集</span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="font-medium">{task.datasetName}</div>
+                              <div className="text-sm text-gray-500">{task.datasetVersion}</div>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="bg-blue-50">
@@ -2316,28 +3408,65 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                             <span className="text-sm">{task.createdBy}</span>
                           </div>
                         </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {getAvailableActions(task).map((action) => {
-                                const ActionIcon = action.icon;
-                                return (
-                                  <DropdownMenuItem
-                                    key={action.key}
-                                    onClick={() => handleTaskAction(action.key, task.id)}
-                                  >
-                                    <ActionIcon className="h-4 w-4 mr-2" />
-                                    {action.label}
-                                  </DropdownMenuItem>
-                                );
-                              })}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                        <TableCell className="sticky right-0 bg-white z-20 border-l">
+                          {/* 常用操作直接展示 */}
+                          {(() => {
+                            const actions = getAvailableActions(task);
+                            const commonKeys = ['view', 'edit', 'start', 'pause'];
+                            const commonActions = actions.filter(a => commonKeys.includes(a.key));
+                            const moreActions = actions.filter(a => !commonKeys.includes(a.key));
+                            const hasStart = commonActions.some(a => a.key === 'start');
+                            const hasPause = commonActions.some(a => a.key === 'pause');
+                            return (
+                              <div className="flex items-center gap-2 justify-end w-[220px]">
+                                {/* 详情 */}
+                                <Button variant="outline" size="sm" onClick={() => handleTaskAction('view', task.id)} className="px-2">
+                                  <Eye className="h-4 w-4 mr-1" /> 详情
+                                </Button>
+                                {/* 编辑（仅当可用） */}
+                                {commonActions.some(a => a.key === 'edit') && (
+                                  <Button variant="outline" size="sm" onClick={() => handleTaskAction('edit', task.id)} className="px-2">
+                                    <Pencil className="h-4 w-4 mr-1" /> 编辑
+                                  </Button>
+                                )}
+                                {/* 开始/暂停 */}
+                                {hasStart && (
+                                  <Button variant="default" size="sm" onClick={() => handleTaskAction('start', task.id)} className="px-2">
+                                    <Play className="h-4 w-4 mr-1" /> 开始
+                                  </Button>
+                                )}
+                                {hasPause && (
+                                  <Button variant="secondary" size="sm" onClick={() => handleTaskAction('pause', task.id)} className="px-2">
+                                    <Pause className="h-4 w-4 mr-1" /> 暂停
+                                  </Button>
+                                )}
+                                {/* 更多 */}
+                                {moreActions.length > 0 && (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="sm" className="px-2">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      {moreActions.map((action) => {
+                                        const ActionIcon = action.icon;
+                                        return (
+                                          <DropdownMenuItem
+                                            key={action.key}
+                                            onClick={() => handleTaskAction(action.key, task.id)}
+                                          >
+                                            <ActionIcon className="h-4 w-4 mr-2" />
+                                            {action.label}
+                                          </DropdownMenuItem>
+                                        );
+                                      })}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                       </TableRow>
                     );
@@ -2352,9 +3481,14 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                 const statusConfig = getStatusConfig(task.status);
                 const priorityConfig = getPriorityConfig(task.priority);
                 const StatusIcon = statusConfig.icon;
+                const isHighlighted = task.id === highlightTaskId;
                 
                 return (
-                  <Card key={task.id} className="hover:shadow-md transition-shadow">
+                  <Card
+                    key={task.id}
+                    id={`task-grid-${task.id}`}
+                    className={`hover:shadow-md transition-shadow ${isHighlighted ? 'ring-2 ring-amber-200 bg-amber-50' : ''}`}
+                  >
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -2410,11 +3544,28 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                       <div className="space-y-2">
                         <div className="flex items-center space-x-2 text-sm">
                           <Database className="h-4 w-4 text-gray-400" />
-                          <span>{task.datasetName} ({task.datasetVersion})</span>
+                          {task.datasets && task.datasets.length > 0 ? (
+                            <span>
+                              {task.datasets[0].name} ({task.datasets[0].version})
+                              {task.datasets.length > 1 && ` 等 ${task.datasets.length} 个数据集`}
+                            </span>
+                          ) : (
+                            <span>{task.datasetName} ({task.datasetVersion})</span>
+                          )}
                         </div>
                         <div className="flex items-center space-x-2 text-sm">
                           <Cpu className="h-4 w-4 text-gray-400" />
                           <span>{task.modelName}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-sm">
+                          <Target className="h-4 w-4 text-gray-400" />
+                          {task.projectId || task.projectName ? (
+                            <Badge variant="secondary" className="bg-purple-50">
+                              {task.projectName ?? (task.projectId ? getProjectName(task.projectId) : '未选择项目')}
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-500">未选择项目</span>
+                          )}
                         </div>
                         <div className="flex items-center space-x-2 text-sm">
                           <User className="h-4 w-4 text-gray-400" />

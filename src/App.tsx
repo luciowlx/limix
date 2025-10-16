@@ -484,10 +484,6 @@ export default function App() {
       case "看板":
         return (
           <div>
-            <div className="mb-6">
-              <h1 className="text-2xl font-semibold text-gray-900 mb-2">AI模型管理平台</h1>
-              <p className="text-gray-600">欢迎使用Limix大数据平台，实时监控您的AI项目进展</p>
-            </div>
             <Dashboard 
               onNavigateToProjectManagement={() => {
                 setActiveTab("项目管理");

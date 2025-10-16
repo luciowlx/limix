@@ -123,22 +123,13 @@ export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps
 
   const renderDataOverview = () => (
     <div className="space-y-6">
-      {/* 数据概览标题和操作 */}
+      {/* 数据概览标题（移除右侧操作按钮） */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">数据概览</h2>
           <p className="text-gray-600 mt-1">查看和分析您的数据集详细信息</p>
         </div>
-        <div className="flex items-center space-x-2">
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-2" />
-            导出数据
-          </Button>
-          <Button variant="outline" size="sm">
-            <Settings className="h-4 w-4 mr-2" />
-            设置
-          </Button>
-        </div>
+        {/* 右侧按钮已按需求移除 */}
       </div>
 
       {/* 数据统计卡片 */}

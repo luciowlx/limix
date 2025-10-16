@@ -879,7 +879,15 @@ export function DataManagement({
                     <Button variant="outline" size="sm" onClick={() => handleViewVersionHistory(dataset.id)}>
                       <History className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => onNavigateToPreprocessing?.()}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        // 修复网格模式下预处理按钮无响应：与列表模式保持一致，直接打开预处理对话框
+                        setSelectedDatasetForPreprocessing(dataset);
+                        setIsDataPreprocessingOpen(true);
+                      }}
+                    >
                       <Zap className="h-4 w-4" />
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => handleDownload(dataset.id)}>

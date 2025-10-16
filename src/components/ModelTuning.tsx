@@ -146,7 +146,7 @@ export function ModelTuning({ onBack }: ModelTuningProps) {
       name: "市场分析数据",
       size: "15.2MB",
       format: "JSON",
-      taskType: "聚类",
+      taskType: "时序预测",
       records: 25000,
       status: "处理中",
       description: "市场调研和消费者行为分析数据"
@@ -156,7 +156,7 @@ export function ModelTuning({ onBack }: ModelTuningProps) {
   const steps = [
     { number: 1, title: "选择基础模型", subtitle: "选择适合您业务需求的基础模型" },
     { number: 2, title: "选择训练数据", subtitle: "选择已处理完成的数据集" },
-    { number: 3, title: "配置参数", subtitle: "设置训练超参数和模型配置" },
+    { number: 3, title: "配置参数", subtitle: "设置训练参数和模型配置" },
     { number: 4, title: "开始训练", subtitle: "启动模型训练并监控进度" }
   ];
 
@@ -389,7 +389,7 @@ export function ModelTuning({ onBack }: ModelTuningProps) {
     <div className="space-y-6">
       <div className="text-center">
         <h3 className="text-xl font-semibold mb-2">配置参数</h3>
-        <p className="text-gray-600">配置模型训练的超参数，合理的参数设置对模型性能至关重要。</p>
+        <p className="text-gray-600">配置模型训练的参数，合理的参数设置对模型性能至关重要。</p>
       </div>
 
       <div className="max-w-2xl mx-auto">

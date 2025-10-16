@@ -22,6 +22,17 @@
 
 ## 变更历史
 
+### 2025-10-16
+- [Fix/Chart] 修复“任务结果”区图表不显示问题：为 ChartContainer 增加尺寸检测与数值回退，避免父容器宽/高为 0 时 Recharts 无法渲染；当检测到 0 尺寸时以 640×240 作为回退尺寸渲染；正常情况下仍维持 width/height 为 100% 的响应式。
+  - 涉及文件：
+    - src/components/ui/chart.tsx（新增 ResizeObserver 尺寸测量；在 ResponsiveContainer 上增加数值回退逻辑；保留 w-full 与 min-h-[220px]）
+    - src/components/TaskDetailFullPage.tsx（确认“指标趋势/时序预测/预测值vs真实值/残差图/误差直方图/模型对比”等 6 类图表使用示例数据渲染）
+  - 说明/验证：使用 `npm run dev` 启动 Vite，本地预览 http://localhost:3000/；进入某个“时序预测”任务的“任务结果”页签，6 类图表均能正常显示（无控制台报错）。
+
+- [Docs] 更新版本修改记录，补充本次修复说明与验证步骤。
+  - 预览地址：http://localhost:3000/
+  
+
 ### 2025-10-11
 - [Fix/UX] 数据预处理规则卡片：移除“启用/禁用”开关，仅保留右侧删除按钮；清洗规则将按当前配置执行（不再提供启用开关）
   - 涉及文件：

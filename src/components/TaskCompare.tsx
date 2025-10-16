@@ -23,7 +23,7 @@ import {
   ErrorBar,
 } from 'recharts';
 
-type TaskType = 'classification' | 'regression';
+type TaskType = 'classification' | 'regression' | 'forecasting';
 
 interface CommonInfo {
   id: string;
@@ -70,6 +70,17 @@ interface RegressionMetrics {
   residuals: { x: number; y: number }[];
 }
 
+interface ForecastPoint { t: number; actual: number; predicted: number }
+interface ForecastingMetrics {
+  mae: number;
+  rmse: number;
+  mape: number; // 0..1
+  smape?: number; // 0..2
+  r2?: number; // 0..1，可选
+  series: ForecastPoint[]; // 时序：实际 vs 预测
+  residuals?: { x: number; y: number }[]; // 可选：残差（t vs error）
+}
+
 interface RunPhase { name: string; durationSec: number }
 interface ResourceUsagePoint { t: number; cpu: number; gpu: number }
 
@@ -79,7 +90,7 @@ interface Actual { gpuMemGB: number; cpuCores: number; ramGB: number }
 interface TaskCompareItem {
   info: CommonInfo;
   type: TaskType;
-  metrics: ClassificationMetrics | RegressionMetrics;
+  metrics: ClassificationMetrics | RegressionMetrics | ForecastingMetrics;
   causalGraph: CausalGraph;
   phases: RunPhase[]; // 数据加载/训练/评估
   usage: ResourceUsagePoint[]; // 时间序列
@@ -166,6 +177,7 @@ export const TaskCompare: React.FC<TaskCompareProps> = ({ task1, task2, onBack }
 
   const isClassification = sameType && task1.type === 'classification';
   const isRegression = sameType && task1.type === 'regression';
+  const isForecasting = sameType && task1.type === 'forecasting';
 
   const clsMetrics = useMemo(() => {
     if (!isClassification) return null;
@@ -192,6 +204,24 @@ export const TaskCompare: React.FC<TaskCompareProps> = ({ task1, task2, onBack }
     ];
   }, [task1, task2, isRegression]);
 
+  const fctMetrics = useMemo(() => {
+    if (!isForecasting) return null;
+    const m1 = task1.metrics as ForecastingMetrics;
+    const m2 = task2.metrics as ForecastingMetrics;
+    const rows: Array<{ name: string; a: number; b: number; isPercent?: boolean }> = [
+      { name: 'MAE', a: m1.mae, b: m2.mae },
+      { name: 'RMSE', a: m1.rmse, b: m2.rmse },
+      { name: 'MAPE', a: m1.mape, b: m2.mape, isPercent: true },
+    ];
+    if (typeof m1.smape === 'number' && typeof m2.smape === 'number') {
+      rows.push({ name: 'SMAPE', a: m1.smape!, b: m2.smape!, isPercent: true });
+    }
+    if (typeof m1.r2 === 'number' && typeof m2.r2 === 'number') {
+      rows.push({ name: 'R²', a: m1.r2!, b: m2.r2! });
+    }
+    return rows;
+  }, [task1, task2, isForecasting]);
+
   const exportCSV = () => {
     const lines: string[] = [];
     lines.push('指标,任务A,任务B');
@@ -203,6 +233,9 @@ export const TaskCompare: React.FC<TaskCompareProps> = ({ task1, task2, onBack }
     }
     if (isRegression && regMetrics) {
       regMetrics.forEach(row => add(row.name, row.a, row.b));
+    }
+    if (isForecasting && fctMetrics) {
+      fctMetrics.forEach(row => add(row.name, row.a, row.b));
     }
     add('总耗时(秒)', task1.totalTimeSec, task2.totalTimeSec);
     add('训练耗时(秒)', task1.trainTimeSec, task2.trainTimeSec);
@@ -295,7 +328,7 @@ export const TaskCompare: React.FC<TaskCompareProps> = ({ task1, task2, onBack }
       <Card>
         <CardHeader>
           <CardTitle>指标对比</CardTitle>
-          <CardDescription>分类或回归任务的核心指标差异</CardDescription>
+          <CardDescription>分类/回归/时序预测任务的核心指标差异</CardDescription>
         </CardHeader>
         <CardContent>
           {!sameType && (
@@ -401,6 +434,80 @@ export const TaskCompare: React.FC<TaskCompareProps> = ({ task1, task2, onBack }
                   <Scatter name="任务A残差" data={(task1.metrics as RegressionMetrics).residuals} fill="#60a5fa" />
                   <Scatter name="任务B残差" data={(task2.metrics as RegressionMetrics).residuals} fill="#a78bfa" />
                 </ScatterChart>
+              </div>
+            </div>
+          )}
+
+          {isForecasting && fctMetrics && (
+            <div className="grid lg:grid-cols-2 gap-6">
+              <div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>指标</TableHead>
+                      <TableHead>任务A</TableHead>
+                      <TableHead>任务B</TableHead>
+                      <TableHead>差异</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {fctMetrics.map(row => (
+                      <TableRow key={row.name}>
+                        <TableCell>{row.name}</TableCell>
+                        <TableCell>{row.isPercent ? percent(row.a) : row.a.toFixed(4)}</TableCell>
+                        <TableCell>{row.isPercent ? percent(row.b) : row.b.toFixed(4)}</TableCell>
+                        <TableCell className={(() => {
+                          const diff = row.b - row.a;
+                          // 对误差类指标（MAE/RMSE/MAPE/SMAPE）来说，diff<0 更好
+                          const isErrorMetric = ['MAE','RMSE','MAPE','SMAPE'].includes(row.name);
+                          const better = isErrorMetric ? diff < 0 : diff > 0;
+                          return better ? 'text-green-600' : diff === 0 ? '' : 'text-red-600';
+                        })()}>
+                          {row.isPercent ? `${((row.b - row.a) * 100).toFixed(2)}%` : (row.b - row.a).toFixed(4)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <div className="mt-4">
+                  {/* 预测 vs 实际 叠加曲线 */}
+                  <LineChart width={600} height={260} data={(task1.metrics as ForecastingMetrics).series.map((p, i) => ({
+                    t: p.t,
+                    actual: p.actual,
+                    A_pred: p.predicted,
+                    B_pred: (task2.metrics as ForecastingMetrics).series[i]?.predicted ?? null,
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="t" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="actual" name="实际值" stroke="#22c55e" dot={false} />
+                    <Line type="monotone" dataKey="A_pred" name="任务A预测" stroke="#60a5fa" dot={false} />
+                    <Line type="monotone" dataKey="B_pred" name="任务B预测" stroke="#a78bfa" dot={false} />
+                  </LineChart>
+                </div>
+              </div>
+              <div>
+                {/* 可选：残差图 */}
+                {((task1.metrics as ForecastingMetrics).residuals || (task2.metrics as ForecastingMetrics).residuals) ? (
+                  <ScatterChart width={600} height={260}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="x" />
+                    <YAxis dataKey="y" />
+                    <Tooltip />
+                    <Legend />
+                    <ReferenceLine y={0} stroke="#9ca3af" />
+                    {(task1.metrics as ForecastingMetrics).residuals ? (
+                      <Scatter name="任务A残差" data={(task1.metrics as ForecastingMetrics).residuals!} fill="#60a5fa" />
+                    ) : null}
+                    {(task2.metrics as ForecastingMetrics).residuals ? (
+                      <Scatter name="任务B残差" data={(task2.metrics as ForecastingMetrics).residuals!} fill="#a78bfa" />
+                    ) : null}
+                  </ScatterChart>
+                ) : (
+                  <div className="text-sm text-gray-600">无残差数据可展示</div>
+                )}
               </div>
             </div>
           )}

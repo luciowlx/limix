@@ -18,7 +18,9 @@ import {
   AlertCircle, 
   RefreshCw,
   Eye,
-  Download
+  Download,
+  Mic,
+  Square
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -68,7 +70,22 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     tags: []
   });
   const [isUploading, setIsUploading] = useState(false);
+  // 语义指令（仅 Solo 模式）
+  const [semanticInstruction, setSemanticInstruction] = useState('');
+  const [llmProcessing, setLlmProcessing] = useState(false);
+  const [llmResult, setLlmResult] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 语音指令输入相关状态与引用（Solo 模式）
+  const [isListening, setIsListening] = useState(false);
+  const [speechText, setSpeechText] = useState('');
+  const [speechStatus, setSpeechStatus] = useState<'idle' | 'listening' | 'processing' | 'error'>('idle');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const animationRef = useRef<number | null>(null);
 
   // 模拟项目列表（后续可替换为真实项目数据）
   const mockProjects = [
@@ -93,6 +110,14 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     });
     setIsUploading(false);
     setIsDragOver(false);
+    // 重置语音模块
+    try {
+      setSpeechText('');
+      setSpeechStatus('idle');
+      if (isListening) {
+        stopVoiceInput();
+      }
+    } catch {}
   }, []);
 
   // 处理文件选择
@@ -278,6 +303,65 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     }));
   }, []);
 
+  // 调用大模型：根据语义指令生成自动化处理方案（示例，支持 OpenAI 兼容接口或本地模拟）
+  const callLLMForProcessing = useCallback(async (instruction: string) => {
+    const firstParsed = files.find(f => f.parsedData);
+    const schemaSummary = firstParsed?.parsedData
+      ? `字段(${firstParsed.parsedData.fields.length}): ` +
+        firstParsed.parsedData.fields.map(f => `${f.name}:${f.type}`).join(', ') +
+        `；记录数: ${firstParsed.parsedData.rowCount}`
+      : '尚未解析到结构信息（将以通用策略处理）。';
+
+    setLlmProcessing(true);
+    setLlmResult('');
+    let prompt = instruction?.trim() ? instruction.trim() : '对上传的数据进行质量分析：去重、处理缺失值、检测异常值，并生成质量报告与汇总统计。';
+    try {
+      const apiKey = (import.meta as any).env?.VITE_OPENAI_API_KEY;
+      const baseUrl = (import.meta as any).env?.VITE_OPENAI_BASE_URL || 'https://api.openai.com/v1';
+      const model = (import.meta as any).env?.VITE_OPENAI_MODEL || 'gpt-4o-mini';
+
+      if (!apiKey) {
+        // 无密钥时做本地模拟
+        await new Promise(r => setTimeout(r, 1200));
+        setLlmResult(
+          `已根据指令自动生成处理方案（模拟）：\n` +
+          `1) 去重并处理缺失值（均值/众数/前向填充）；\n` +
+          `2) 异常值检测（IQR/Z-Score），标记并输出报告；\n` +
+          `3) 依据业务字段进行聚合统计与报表导出。\n` +
+          `指令: ${prompt}\n上下文: ${schemaSummary}`
+        );
+        toast.info('已使用本地模拟处理（未配置大模型 API 密钥）');
+      } else {
+        const resp = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: '你是数据工程与分析助手，请根据指令生成可执行的数据处理计划，用清晰的步骤说明，并简要解释每一步目的。' },
+              { role: 'user', content: `指令: ${prompt}\n数据上下文: ${schemaSummary}\n请输出可执行的处理步骤与预期输出（以分点列表呈现）。` }
+            ],
+            temperature: 0.2
+          })
+        });
+        if (!resp.ok) throw new Error(`LLM 请求失败: ${resp.status}`);
+        const data = await resp.json();
+        const content = data?.choices?.[0]?.message?.content || '无返回内容';
+        setLlmResult(content);
+        toast.success('已根据语义指令生成处理方案');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setLlmResult(`处理失败：${err?.message || '未知错误'}`);
+      toast.error('语义指令处理失败');
+    } finally {
+      setLlmProcessing(false);
+    }
+  }, [files]);
+
   // 开始上传
   const handleStartUpload = useCallback(async () => {
     if (!formData.name.trim()) {
@@ -323,7 +407,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     } finally {
       setIsUploading(false);
     }
-  }, [formData, files, uploadFile, onUploadSuccess, onClose, resetState]);
+  }, [formData, files, uploadFile, onUploadSuccess, onClose, resetState, callLLMForProcessing, semanticInstruction]);
 
   // 关闭对话框
   const handleClose = useCallback(() => {
@@ -331,9 +415,17 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
       toast.warning('上传进行中，请稍候');
       return;
     }
+    // 关闭对话框时停止语音采集与识别
+    try {
+      if (isListening) {
+        stopVoiceInput();
+      }
+    } catch (e) {
+      // 忽略关闭时的清理异常
+    }
     onClose();
     resetState();
-  }, [isUploading, onClose, resetState]);
+  }, [isUploading, onClose, resetState, isListening]);
 
   // 获取文件状态图标
   const getFileStatusIcon = (status: UploadFile['status']) => {
@@ -366,9 +458,142 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     }
   };
 
+  // 初始化语音识别（Web Speech API）
+  const initSpeechRecognition = useCallback(() => {
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('当前浏览器不支持语音识别', { description: '建议使用最新的 Chrome/Edge 浏览器' });
+      setSpeechStatus('error');
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    recognition.onresult = (event: any) => {
+      const results = event.results;
+      let transcript = '';
+      for (let i = event.resultIndex; i < results.length; i++) {
+        transcript += results[i][0].transcript;
+      }
+      setSpeechText(prev => {
+        // 只保留最近的 1000 字符，避免无限增长
+        const combined = (prev + ' ' + transcript).trim();
+        return combined.length > 1000 ? combined.slice(combined.length - 1000) : combined;
+      });
+    };
+
+    recognition.onstart = () => setSpeechStatus('listening');
+    recognition.onend = () => {
+      // 如果仍在监听，自动重启
+      if (isListening) {
+        try { recognition.start(); } catch {}
+      } else {
+        setSpeechStatus('idle');
+      }
+    };
+    recognition.onerror = () => setSpeechStatus('error');
+
+    recognitionRef.current = recognition;
+  }, [isListening]);
+
+  // 波形绘制
+  const drawWaveform = useCallback(() => {
+    const canvas = waveformCanvasRef.current;
+    const analyser = analyserRef.current;
+    if (!canvas || !analyser) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const width = canvas.width = canvas.clientWidth;
+    const height = canvas.height = 96;
+    analyser.fftSize = 2048;
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const render = () => {
+      analyser.getByteTimeDomainData(dataArray);
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, width, height);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#3b82f6';
+      ctx.beginPath();
+      const sliceWidth = width / bufferLength;
+      let x = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0; // 0-255 -> around 1
+        const y = (v * height) / 2;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.lineTo(width, height / 2);
+      ctx.stroke();
+      animationRef.current = requestAnimationFrame(render);
+    };
+    render();
+  }, []);
+
+  // 开始语音输入
+  const startVoiceInput = useCallback(async () => {
+    if (isListening) return;
+    try {
+      setSpeechText('');
+      setSpeechStatus('processing');
+      // 麦克风采集
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyserRef.current = analyser;
+      source.connect(analyser);
+
+      // 初始化识别并开始
+      initSpeechRecognition();
+      if (recognitionRef.current) {
+        try { recognitionRef.current.start(); } catch {}
+      }
+
+      setIsListening(true);
+      setSpeechStatus('listening');
+      drawWaveform();
+    } catch (err) {
+      console.error(err);
+      setSpeechStatus('error');
+      toast.error('无法启动语音输入', { description: '请检查麦克风权限设置' });
+    }
+  }, [isListening, initSpeechRecognition, drawWaveform]);
+
+  // 停止语音输入
+  const stopVoiceInput = useCallback(() => {
+    try {
+      setIsListening(false);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+        recognitionRef.current = null;
+      }
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      if (analyserRef.current) analyserRef.current.disconnect();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(t => t.stop());
+        mediaStreamRef.current = null;
+      }
+      setSpeechStatus('idle');
+    } catch {}
+  }, []);
+
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-full sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>数据上传</DialogTitle>
           <DialogDescription>
@@ -523,6 +748,99 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
               </div>
             </RadioGroup>
           </div>
+
+          {/* Solo 模式：原型图示例 + 语音指令输入模块 */}
+          {formData.mode === 'solo' && (
+            <div className="space-y-4">
+              {/* 原型图示例区块 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>原型图示例（流程预览）</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-md border bg-white">
+                      <div className="text-sm font-medium">数据分析</div>
+                      <p className="text-xs text-gray-600 mt-1">字段类型识别、缺失值/异常值检测</p>
+                    </div>
+                    <div className="p-3 rounded-md border bg-white">
+                      <div className="text-sm font-medium">策略选择</div>
+                      <p className="text-xs text-gray-600 mt-1">按质量问题自动匹配最佳清洗方案</p>
+                    </div>
+                    <div className="p-3 rounded-md border bg-white">
+                      <div className="text-sm font-medium">执行清洗</div>
+                      <p className="text-xs text-gray-600 mt-1">规范化、补全、去重、异常修正</p>
+                    </div>
+                    <div className="p-3 rounded-md border bg-white">
+                      <div className="text-sm font-medium">查看结果</div>
+                      <p className="text-xs text-gray-600 mt-1">报告与预览，支持回滚与导出</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-3">Solo 模式会自动分析并清洗数据，您也可以通过语音指令微调策略。</p>
+                </CardContent>
+              </Card>
+
+              {/* 语音指令输入模块 */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle>语音指令输入</CardTitle>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className={
+                      speechStatus === 'listening' ? 'text-green-600' :
+                      speechStatus === 'processing' ? 'text-blue-600' :
+                      speechStatus === 'error' ? 'text-red-600' : 'text-gray-600'
+                    }>
+                      {speechStatus === 'idle' && '空闲'}
+                      {speechStatus === 'listening' && '监听中'}
+                      {speechStatus === 'processing' && '初始化中'}
+                      {speechStatus === 'error' && '异常'}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={startVoiceInput}
+                      disabled={isListening}
+                      className="flex items-center gap-2"
+                    >
+                      <Mic className="h-4 w-4" /> 开始录音
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={stopVoiceInput}
+                      disabled={!isListening}
+                      className="flex items-center gap-2"
+                    >
+                      <Square className="h-4 w-4" /> 停止
+                    </Button>
+                    <span className="text-xs text-gray-500">支持实时识别与显示，中文优先。</span>
+                  </div>
+
+                  {/* 波形可视化 */}
+                  <div className="rounded-md border bg-white p-2">
+                    <canvas ref={waveformCanvasRef} className="w-full h-24" />
+                  </div>
+
+                  {/* 实时识别文本 */}
+                  <div className="space-y-2">
+                    <Label>实时识别文本</Label>
+                    <Textarea
+                      value={speechText}
+                      readOnly
+                      placeholder="语音识别内容将实时显示在此，您可以继续录音或点击停止。"
+                      className="min-h-[80px]"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           {/* 文件上传区域 */}
           <div className="space-y-4">
@@ -698,6 +1016,8 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
               </div>
             </div>
           )}
+
+          {/* 已按需求移除 Solo 模式下的语义指令处理结果展示 */}
 
           {/* 操作按钮 */}
           <div className="flex justify-end space-x-3 pt-4 border-t">
