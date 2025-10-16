@@ -84,6 +84,7 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
   // 导出需要的可视化区域引用
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const causalRef = useRef<HTMLDivElement | null>(null);
+  const paramsJsonRef = useRef<HTMLDivElement | null>(null);
 
   // 数据预览：多数据集切换 & 行数选择
   const [datasetPreviewIndex, setDatasetPreviewIndex] = useState(0);
@@ -486,6 +487,7 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
   const mockArtifacts = [
     { name: 'training_history.json', type: 'Metrics', size: '12.5 KB', url: '#' },
     { name: 'model_config.yaml', type: 'Configuration', size: '2.1 KB', url: '#' },
+    { name: 'task_params.json', type: 'Parameters', size: '3.1 KB', url: '#' },
   ];
   const mockDatasetRows = [
     { PassengerId: 1, Survived: 0, Pclass: 3, Name: 'Braund, Mr. Owen Harris', Sex: 'male', Age: 22, SibSp: 1, Parch: 0, Ticket: 'A/5 21171', Fare: 7.25, Cabin: 'N/A', Embarked: 'S' },
@@ -1702,6 +1704,22 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
           </div>
         </CardContent>
       </Card>
+      <Card ref={paramsJsonRef} className="transition-all duration-200 hover:shadow-md border-gray-200">
+        <CardHeader className="flex-row items-center justify-between">
+          <div>
+            <CardTitle>参数 JSON 回显</CardTitle>
+            <CardDescription>用于复盘与核对，支持直接导出 JSON 文件</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleExportParamsJson}>
+            <Download className="h-4 w-4 mr-2" /> 导出 JSON
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-w-full max-h-[520px] overflow-auto whitespace-pre break-words">
+            {parameterJSON}
+          </pre>
+        </CardContent>
+      </Card>
     </div>
   );
 
@@ -1741,6 +1759,11 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
                         className="transition-all duration-200 hover:bg-blue-50 hover:border-blue-200"
                         disabled={loadingAction === `download-${index}`}
                         onClick={() => {
+                          if (artifact.name === 'task_params.json') {
+                            // 直接导出参数 JSON
+                            handleExportParamsJson();
+                            return;
+                          }
                           setLoadingAction(`download-${index}`);
                           setTimeout(() => setLoadingAction(null), 1500);
                         }}
@@ -1759,6 +1782,10 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
                         disabled={loadingAction === `preview-${index}`}
                         onClick={() => {
                           setLoadingAction(`preview-${index}`);
+                          if (artifact.name === 'task_params.json') {
+                            // 滚动至参数 JSON 预览卡片
+                            paramsJsonRef?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }
                           setTimeout(() => setLoadingAction(null), 1000);
                         }}
                       >
@@ -2204,25 +2231,7 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
                   </div>
                 </CardContent>
               </Card>
-              {/* 参数 JSON 回显与导出 */}
-              <Card className="transition-all duration-200 hover:shadow-md border-gray-200 mt-6">
-                <CardHeader className="flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>参数 JSON 回显</CardTitle>
-                    <CardDescription>用于复盘与核对，支持直接导出 JSON 文件</CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={handleExportParamsJson}>
-                      <Download className="h-4 w-4 mr-2" /> 导出 JSON
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-w-full max-h-56 overflow-auto overflow-x-auto whitespace-pre-wrap break-words">
-                    {parameterJSON}
-                  </pre>
-                </CardContent>
-              </Card>
+              {/* 参数 JSON 回显已移动到“任务产物”区展示 */}
             </section>
 
             {/* 任务结果 */}

@@ -31,6 +31,11 @@
 
 - [Docs] 更新版本修改记录，补充本次修复说明与验证步骤。
   - 预览地址：http://localhost:3000/
+ 
+ - [Feature/UI] 将“参数 JSON 回显”从“参数配置”区移动至“任务产物”区进行展示，并在产物列表新增 `task_params.json` 条目；为该条目绑定“下载”直接导出 JSON 与“预览”滚动定位到下方卡片；预览区增大高度并使用 `whitespace-pre` 确保格式完整呈现。
+   - 涉及文件：
+     - src/components/TaskDetailFullPage.tsx（新增 artifacts 列表项、产物区参数 JSON 卡片、下载/预览行为联动；移除参数配置区的旧卡片）
+   - 说明/验证：运行 `npm run dev`，在任务详情页左侧点击“任务产物”，确认列表出现 `task_params.json`；点击“预览”会滚动到下方“参数 JSON 回显”卡片，点击“下载”直接导出 JSON 文件；预览区域可完整显示格式化 JSON；预览地址 http://localhost:3000/。
   
 
 ### 2025-10-11
