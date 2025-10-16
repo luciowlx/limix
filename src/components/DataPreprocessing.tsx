@@ -136,6 +136,77 @@ interface ProcessingResult {
     { id: '3', name: '设备维保日志', type: '日志数据', size: '40MB', rows: '250,000', columns: '12', completeness: 76 },
     { id: '4', name: '质量检测结果集', type: '检测记录', size: '65MB', rows: '45,200', columns: '16', completeness: 81 }
   ];
+
+  // 为示例数据集提供字段梳理（schema）映射，用于在“选择数据集（Step 0）”即时展示
+  const datasetFieldSchemas: Record<string, Array<{ name: string; type: FieldInfo['type'] }>> = {
+    '1': [
+      { name: 'timestamp', type: 'date' },
+      { name: 'device_id', type: 'string' },
+      { name: 'temperature', type: 'number' },
+      { name: 'humidity', type: 'number' },
+      { name: 'pressure', type: 'number' },
+      { name: 'vibration', type: 'number' },
+      { name: 'current', type: 'number' },
+      { name: 'voltage', type: 'number' },
+      { name: 'status', type: 'string' },
+      { name: 'alarm_code', type: 'string' },
+      { name: 'operator', type: 'string' },
+      { name: 'shift', type: 'string' },
+      { name: 'line_no', type: 'string' },
+      { name: 'product_id', type: 'string' },
+      { name: 'defect_rate', type: 'number' }
+    ],
+    '2': [
+      { name: 'order_id', type: 'string' },
+      { name: 'customer', type: 'string' },
+      { name: 'sku', type: 'string' },
+      { name: 'quantity', type: 'number' },
+      { name: 'unit_price', type: 'number' },
+      { name: 'total', type: 'number' },
+      { name: 'order_date', type: 'date' },
+      { name: 'status', type: 'string' },
+      { name: 'warehouse', type: 'string' },
+      { name: 'province', type: 'string' },
+      { name: 'city', type: 'string' },
+      { name: 'channel', type: 'string' },
+      { name: 'operator_id', type: 'string' },
+      { name: 'updated_at', type: 'date' }
+    ],
+    '3': [
+      { name: 'log_id', type: 'string' },
+      { name: 'device_id', type: 'string' },
+      { name: 'event', type: 'string' },
+      { name: 'level', type: 'string' },
+      { name: 'message', type: 'string' },
+      { name: 'created_at', type: 'date' },
+      { name: 'duration_ms', type: 'number' },
+      { name: 'error_code', type: 'string' },
+      { name: 'stack', type: 'string' },
+      { name: 'module', type: 'string' },
+      { name: 'ip', type: 'string' }
+    ],
+    '4': [
+      { name: 'sample_id', type: 'string' },
+      { name: 'inspection_item', type: 'string' },
+      { name: 'result', type: 'string' },
+      { name: 'value', type: 'number' },
+      { name: 'unit', type: 'string' },
+      { name: 'spec_lower', type: 'number' },
+      { name: 'spec_upper', type: 'number' },
+      { name: 'judge', type: 'string' },
+      { name: 'inspector', type: 'string' },
+      { name: 'station', type: 'string' },
+      { name: 'batch_no', type: 'string' },
+      { name: 'lot_no', type: 'string' },
+      { name: 'timestamp', type: 'date' },
+      { name: 'method', type: 'string' },
+      { name: 'image_url', type: 'string' },
+      { name: 'remarks', type: 'string' }
+    ]
+  };
+
+  // 当前选中数据集（用于展示信息面板）
+  const selectedDataset = datasetOptions.find(d => d.id === selectedDatasetId);
   
   // 确认弹窗状态
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -802,12 +873,47 @@ interface ProcessingResult {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="text-sm text-gray-600">
-                          <p>提示：</p>
-                          <ul className="list-disc list-inside space-y-1">
-                            <li>从任意入口发起预处理，流程保持一致：先选择数据集，再进行字段与规则配置。</li>
-                            <li>从数据集行内操作进入时，这里会自动预选对应数据集。</li>
-                          </ul>
+                        <div>
+                          {selectedDataset ? (
+                            <div className="rounded-md border bg-muted/40 p-3">
+                              <div className="flex items-center justify-between">
+                                <div className="text-sm font-medium">{selectedDataset.name}</div>
+                                <div className="flex items-center gap-2">
+                                  {/* 复用全局隐藏的文件输入 */}
+                                  <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                                    上传
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="mt-1 text-xs text-gray-600">
+                                {`${selectedDataset.rows} 条记录 · ${(datasetFieldSchemas[selectedDatasetId!]?.length ?? Number(selectedDataset.columns))} 个字段 · ${selectedDataset.size}`}
+                              </div>
+                              <div className="mt-3">
+                                <div className="text-xs font-medium mb-2">字段梳理</div>
+                                <div className="max-h-40 overflow-auto rounded-sm border bg-background/60">
+                                  <ul className="divide-y">
+                                    {(datasetFieldSchemas[selectedDatasetId!] || []).map((f, idx) => (
+                                      <li key={idx} className="px-2 py-1 flex items-center justify-between text-xs">
+                                        <span className="text-gray-700">{f.name}</span>
+                                        <span className="text-gray-500">{f.type}</span>
+                                      </li>
+                                    ))}
+                                    {(!datasetFieldSchemas[selectedDatasetId!] || datasetFieldSchemas[selectedDatasetId!]!.length === 0) && (
+                                      <li className="px-2 py-2 text-xs text-gray-500">暂未提供字段信息</li>
+                                    )}
+                                  </ul>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-600">
+                              <p>提示：</p>
+                              <ul className="list-disc list-inside space-y-1">
+                                <li>从任意入口发起预处理，流程保持一致：先选择数据集，再进行字段与规则配置。</li>
+                                <li>从数据集行内操作进入时，这里会自动预选对应数据集。</li>
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </CardContent>
