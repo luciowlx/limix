@@ -45,6 +45,8 @@
 - [Fix/UI] 调整预览高度：将“任务产物”预览弹窗容器限制为 `max-h-[72vh]`，预览内容区域 `max-h-[60vh]` 并开启滚动；同时将“参数 JSON 回显”卡片的默认高度收敛为 `max-h-[420px]`（中屏为 `520px`，大屏为 `60vh`），避免过高影响页面浏览。
 
 - [Fix/Artifacts] 去掉红框内容：从产物列表中移除 `training_history.json`（示例数据不再展示）；移除下方“参数 JSON 回显”卡片，并将 `task_params.json` 的“预览”改为弹窗展示，保持“下载”导出不变。
+
+- [Feat/Artifacts] 更新 `task_params.json` 的预览内容：弹窗中展示新的结构体字段（task_info、dataset_config、model_config、resource_config），与需求示例一致；下载内容与预览保持一致。
   
 
 ### 2025-10-11

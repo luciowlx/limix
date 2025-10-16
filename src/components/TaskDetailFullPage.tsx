@@ -813,16 +813,42 @@ output:
     );
   };
 
-  // 参数JSON回显与导出（模拟）
+  // 参数 JSON 预览内容：按需求展示指定结构
   const parameterJSON = React.useMemo(() => {
-    const base = task.parameters || { learning_rate: 0.01, batch_size: 64, epochs: 8 };
     const json = {
-      forecasting_params: forecastingParams,
-      parameters: base,
-      resource_quota: { gpu: 2, memory_gb: 16 },
+      task_info: {
+        task_id: 'TASK-20240601-1234',
+        task_name: '设备故障预测',
+        task_type: 'time_series',
+        project_id: 'PROJ-20240501-001',
+        create_time: '2024-06-01 10:00:00',
+      },
+      dataset_config: {
+        selected_datasets: [
+          { dataset_id: 'DATA-20240520-002', version: 'v2', role: 'main_variable' },
+          { dataset_id: 'DATA-20240521-003', version: 'v1', role: 'covariate' },
+        ],
+        target_column: '故障等级',
+      },
+      model_config: {
+        selected_models: [
+          { model_name: 'Limix', model_id: 'MODEL-20240401-001', source: 'self_developed' },
+          { model_name: 'XGBoost', model_id: 'MODEL-20240402-002', source: 'third_party' },
+        ],
+        hyper_parameters: {
+          context_length: 100,
+          predict_length: 50,
+          step: 10,
+          predict_start_time: '2024-06-01 00:00:00',
+        },
+      },
+      resource_config: {
+        resource_type: 'GPU',
+        quota: { cpu_cores: 8, memory_gb: 64, gpu_cards: 2, max_runtime_hours: 24 },
+      },
     };
     return JSON.stringify(json, null, 2);
-  }, [forecastingParams, task.parameters]);
+  }, []);
 
   const handleExportParamsJson = () => {
     const blob = new Blob([parameterJSON], { type: 'application/json;charset=utf-8' });
