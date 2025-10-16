@@ -85,6 +85,70 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const causalRef = useRef<HTMLDivElement | null>(null);
   const paramsJsonRef = useRef<HTMLDivElement | null>(null);
+  // 产物预览弹窗状态
+  const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
+  const [artifactPreviewName, setArtifactPreviewName] = useState<string | null>(null);
+  const [artifactPreviewType, setArtifactPreviewType] = useState<'yaml' | 'json' | 'text'>('yaml');
+  const [artifactPreviewContent, setArtifactPreviewContent] = useState<string>('');
+
+  // 示例：model_config.yaml 预览内容（后续可替换为后端真实返回）
+  const MODEL_CONFIG_YAML_SAMPLE = `# 1. 任务元信息（追溯与关联）
+task_info:
+  task_id: "TASK-20240601-1234"  # 任务唯一标识
+  task_name: "设备故障预测"       # 任务名称
+  task_type: "time_series"       # 任务类型（时序预测/分类/回归）
+  project_id: "PROJ-20240501-001" # 所属项目ID
+  create_time: "2024-06-01 10:00:00" # 创建时间
+
+# 2. 数据集配置（输入数据约束）
+dataset:
+  selected_datasets:  # 选中的数据集及版本
+    - dataset_id: "DATA-20240520-002"
+      version: "v2"
+      role: "main_variable"  # 角色（主变量/协变量，仅时序预测）
+    - dataset_id: "DATA-20240521-003"
+      version: "v1"
+      role: "covariate"
+  target_column: "故障等级"  # 目标字段
+  sample_count: 10000        # 样本量（冗余存储，便于快速校验）
+
+# 3. 模型配置（推理核心参数）
+model:
+  selected_models:  # 选中的模型及来源
+    - model_name: "Limix"
+      model_id: "MODEL-20240401-001"
+      version: "v1.2"
+      source: "self_developed"  # 自研/微调/第三方
+    - model_name: "XGBoost"
+      model_id: "MODEL-20240402-002"
+      version: "v0.9"
+      source: "third_party"
+  hyper_parameters:  # 模型超参数（按任务类型区分）
+    time_series:  # 时序预测参数
+      context_length: 100
+      predict_length: 50
+      step: 10
+      predict_start_time: "2024-06-01 00:00:00"
+    # 分类/回归任务参数示例（根据任务类型动态生成）
+    # classification:
+    #   train_test_split: 0.8
+    #   shuffle: false
+
+# 4. 资源配置（运行环境约束）
+resource:
+  resource_type: "GPU"  # CPU/GPU/NPU/auto
+  quota:
+    cpu_cores: 8
+    memory_gb: 64
+    gpu_cards: 2
+    max_runtime_hours: 24
+
+# 5. 输出配置（推理结果约束）
+output:
+  format: "json"  # 结果输出格式
+  include_unslected_columns: true  # 是否包含未选字段（PRD中明确的需求）
+  visualization:  # 可视化相关配置
+    enable_causal: true  # 是否生成因果可视化`;
 
   // 数据预览：多数据集切换 & 行数选择
   const [datasetPreviewIndex, setDatasetPreviewIndex] = useState(0);
@@ -767,6 +831,16 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
     const a = document.createElement('a');
     a.href = url;
     a.download = `task_${task.id}_params.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportModelYaml = () => {
+    const blob = new Blob([MODEL_CONFIG_YAML_SAMPLE], { type: 'text/yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `model_config.yaml`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1704,22 +1778,7 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
           </div>
         </CardContent>
       </Card>
-      <Card ref={paramsJsonRef} className="transition-all duration-200 hover:shadow-md border-gray-200">
-        <CardHeader className="flex-row items-center justify-between">
-          <div>
-            <CardTitle>参数 JSON 回显</CardTitle>
-            <CardDescription>用于复盘与核对，支持直接导出 JSON 文件</CardDescription>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleExportParamsJson}>
-            <Download className="h-4 w-4 mr-2" /> 导出 JSON
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-w-full max-h-[520px] overflow-auto whitespace-pre break-words">
-            {parameterJSON}
-          </pre>
-        </CardContent>
-      </Card>
+      {/* 参数 JSON 预览卡片已移至“任务产物”区 */}
     </div>
   );
 
@@ -1764,6 +1823,11 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
                             handleExportParamsJson();
                             return;
                           }
+                          if (artifact.name === 'model_config.yaml') {
+                            // 导出模型配置 YAML
+                            handleExportModelYaml();
+                            return;
+                          }
                           setLoadingAction(`download-${index}`);
                           setTimeout(() => setLoadingAction(null), 1500);
                         }}
@@ -1785,6 +1849,12 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
                           if (artifact.name === 'task_params.json') {
                             // 滚动至参数 JSON 预览卡片
                             paramsJsonRef?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          } else if (artifact.name === 'model_config.yaml') {
+                            // 打开 YAML 预览弹窗
+                            setArtifactPreviewName(artifact.name);
+                            setArtifactPreviewType('yaml');
+                            setArtifactPreviewContent(MODEL_CONFIG_YAML_SAMPLE);
+                            setArtifactPreviewOpen(true);
                           }
                           setTimeout(() => setLoadingAction(null), 1000);
                         }}
@@ -1804,6 +1874,35 @@ const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, 
           </Table>
         </CardContent>
       </Card>
+      {/* 参数 JSON 回显（移动至“任务产物”区集中展示） */}
+      <Card ref={paramsJsonRef} className="transition-all duration-200 hover:shadow-md border-gray-200">
+        <CardHeader className="flex-row items-center justify-between">
+          <div>
+            <CardTitle>参数 JSON 回显</CardTitle>
+            <CardDescription>用于复盘与核对，支持直接导出 JSON 文件</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleExportParamsJson}>
+            <Download className="h-4 w-4 mr-2" /> 导出 JSON
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full max-w-full max-h-[520px] overflow-auto whitespace-pre break-words">
+            {parameterJSON}
+          </pre>
+        </CardContent>
+      </Card>
+
+      {/* 产物预览弹窗 */}
+      <Dialog open={artifactPreviewOpen} onOpenChange={setArtifactPreviewOpen}>
+        <DialogContent className="sm:max-w-3xl w-[95vw] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>预览：{artifactPreviewName}</DialogTitle>
+          </DialogHeader>
+          <pre className="bg-gray-50 rounded-md p-4 text-xs w-full whitespace-pre break-words">
+            {artifactPreviewContent}
+          </pre>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 
