@@ -2377,8 +2377,8 @@ output:
                 <CardContent>
                   <div className="space-y-3">
                     <div className="text-sm font-medium text-gray-700">因果关系示意图（包含影响强度）</div>
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <svg viewBox="0 0 500 320" className="w-full h-64">
+                    <div className="bg-gray-50 rounded-lg p-2 md:p-3">
+                      <svg viewBox="0 0 500 320" className="w-full h-48 md:h-56 lg:h-56 max-h-[50vh]">
                         {/* edges */}
                         {[...causalGraph.edges]
                           .sort((a,b) => b.strength - a.strength)

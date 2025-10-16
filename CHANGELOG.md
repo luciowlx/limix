@@ -47,6 +47,8 @@
 - [Fix/Artifacts] 去掉红框内容：从产物列表中移除 `training_history.json`（示例数据不再展示）；移除下方“参数 JSON 回显”卡片，并将 `task_params.json` 的“预览”改为弹窗展示，保持“下载”导出不变。
 
 - [Feat/Artifacts] 更新 `task_params.json` 的预览内容：弹窗中展示新的结构体字段（task_info、dataset_config、model_config、resource_config），与需求示例一致；下载内容与预览保持一致。
+
+- [Tweak/UI] 因果关系图尺寸优化：将因果图的 SVG 高度从 `h-64` 调整为 `h-48 md:h-56`，并增加 `max-h-[50vh]` 限制，同时略微收紧外层内边距（`p-2 md:p-3`），以与其他可视化图表保持更协调的占位比例。
   
 
 ### 2025-10-11
