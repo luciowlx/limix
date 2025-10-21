@@ -103,10 +103,10 @@ task_info:
 dataset:
   selected_datasets:  # 选中的数据集及版本
     - dataset_id: "DATA-20240520-002"
-      version: "v2"
+      version: "v2.0"
       role: "main_variable"  # 角色（主变量/协变量，仅时序预测）
     - dataset_id: "DATA-20240521-003"
-      version: "v1"
+      version: "v1.0"
       role: "covariate"
   target_column: "故障等级"  # 目标字段
   sample_count: 10000        # 样本量（冗余存储，便于快速校验）
@@ -581,47 +581,47 @@ output:
 
   const datasetStatsRegistry: Record<string, DatasetStats> = {
     // 生产质量数据集
-    'DATA-2025-001@v3': {
+    'DATA-2025-001@v3.0': {
       id: 'DATA-2025-001',
       name: '生产质量数据集',
-      version: 'v3',
+      version: 'v3.0',
       size: '2.5MB',
       fieldCount: 15,
       sampleCount: 10000,
       fields: ['id', 'temperature', 'pressure', 'defect_rate', 'quality_score']
     },
-    'DATA-2025-001@v2': {
+    'DATA-2025-001@v2.0': {
       id: 'DATA-2025-001',
       name: '生产质量数据集',
-      version: 'v2',
+      version: 'v2.0',
       size: '2.3MB',
       fieldCount: 14,
       sampleCount: 9800,
       fields: ['id', 'temperature', 'pressure', 'defect_rate', 'quality_score']
     },
-    'DATA-2025-001@v1': {
+    'DATA-2025-001@v1.0': {
       id: 'DATA-2025-001',
       name: '生产质量数据集',
-      version: 'v1',
+      version: 'v1.0',
       size: '2.1MB',
       fieldCount: 12,
       sampleCount: 9500,
       fields: ['id', 'temperature', 'pressure', 'defect_rate', 'quality_score']
     },
     // 客户行为数据集
-    'DATA-2025-002@v2': {
+    'DATA-2025-002@v2.0': {
       id: 'DATA-2025-002',
       name: '客户行为数据集',
-      version: 'v2',
+      version: 'v2.0',
       size: '5.2MB',
       fieldCount: 20,
       sampleCount: 25000,
       fields: ['user_id', 'age', 'purchase_amount', 'category', 'satisfaction']
     },
-    'DATA-2025-002@v1': {
+    'DATA-2025-002@v1.0': {
       id: 'DATA-2025-002',
       name: '客户行为数据集',
-      version: 'v1',
+      version: 'v1.0',
       size: '4.8MB',
       fieldCount: 18,
       sampleCount: 23000,
@@ -825,8 +825,8 @@ output:
       },
       dataset_config: {
         selected_datasets: [
-          { dataset_id: 'DATA-20240520-002', version: 'v2', role: 'main_variable' },
-          { dataset_id: 'DATA-20240521-003', version: 'v1', role: 'covariate' },
+          { dataset_id: 'DATA-20240520-002', version: 'v2.0', role: 'main_variable' },
+          { dataset_id: 'DATA-20240521-003', version: 'v1.0', role: 'covariate' },
         ],
         target_column: '故障等级',
       },
@@ -2285,7 +2285,7 @@ output:
                   <CardContent className="space-y-2">
                     <div><span className="text-sm text-gray-600">模型名称</span><p className="font-medium">{task.modelName}</p></div>
                     <div><span className="text-sm text-gray-600">模型类型</span><p className="font-medium">自研</p></div>
-                    <div><span className="text-sm text-gray-600">版本号</span><p className="font-medium">v1.0.0</p></div>
+                    <div><span className="text-sm text-gray-600">版本号</span><p className="font-medium">v1.0</p></div>
                     <div><span className="text-sm text-gray-600">模型描述</span><p className="text-gray-900">用于{getTaskTypeLabel(task.taskType)}任务的模型。</p></div>
                   </CardContent>
                 </Card>

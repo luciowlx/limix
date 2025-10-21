@@ -49,7 +49,6 @@ interface AutoCleaningStrategy {
   confidence: number;
   impact: 'low' | 'medium' | 'high';
   enabled: boolean;
-  estimatedTime: string;
   affectedRows: number;
   affectedColumns: string[];
 }
@@ -345,7 +344,6 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
         confidence: 95,
         impact: 'medium',
         enabled: true,
-        estimatedTime: '2分钟',
         affectedRows: 3247,
         affectedColumns: ['user_id', 'timestamp', 'action']
       },
@@ -357,7 +355,6 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
         confidence: 88,
         impact: 'high',
         enabled: true,
-        estimatedTime: '5分钟',
         affectedRows: 8934,
         affectedColumns: ['age', 'location']
       },
@@ -369,7 +366,6 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
         confidence: 92,
         impact: 'medium',
         enabled: true,
-        estimatedTime: '3分钟',
         affectedRows: 12456,
         affectedColumns: ['created_at', 'phone', 'email']
       },
@@ -381,7 +377,6 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
         confidence: 76,
         impact: 'low',
         enabled: false,
-        estimatedTime: '4分钟',
         affectedRows: 234,
         affectedColumns: ['purchase_amount']
       },
@@ -393,7 +388,6 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
         confidence: 85,
         impact: 'medium',
         enabled: true,
-        estimatedTime: '6分钟',
         affectedRows: 45678,
         affectedColumns: ['name', 'address', 'category']
       }
@@ -436,7 +430,7 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
         processedRows: datasetInfo.rows - (strategy.id === 'remove_duplicates' ? strategy.affectedRows : 0),
         removedRows: strategy.id === 'remove_duplicates' ? strategy.affectedRows : 0,
         modifiedCells: strategy.affectedRows * strategy.affectedColumns.length,
-        executionTime: strategy.estimatedTime,
+        executionTime: "2秒",
         details: strategy.affectedColumns.map(col => ({
           field: col,
           action: getActionByStrategy(strategy.id),
@@ -572,7 +566,7 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <Wand2 className="h-5 w-5 text-purple-500" />
-            <span>Solo模式 - 自动数据清洗</span>
+            <span>自动数据清洗</span>
           </DialogTitle>
           <DialogDescription>
             AI驱动的智能数据清洗，自动检测问题并应用最佳策略
@@ -662,7 +656,7 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-gray-600">
-                  Solo模式将自动分析您的数据，识别质量问题并生成最优的清洗策略。
+                  系统将自动分析您的数据，识别质量问题并生成最优的清洗策略。
                 </p>
                 <div className="flex space-x-4">
                   <Button 
@@ -744,7 +738,7 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
                             </div>
                             <p className="text-sm text-gray-600 mb-2">{strategy.description}</p>
                             <div className="flex items-center space-x-4 text-xs text-gray-500">
-                              <span>预计时间: {strategy.estimatedTime}</span>
+                              {/* 预计时间已移除 */}
                               <span>影响行数: {strategy.affectedRows.toLocaleString()}</span>
                               <span>影响字段: {strategy.affectedColumns.join(', ')}</span>
                             </div>
@@ -757,11 +751,7 @@ export function SoloDataCleaning({ isOpen, onClose, datasetId }: SoloDataCleanin
                 
                 <div className="flex justify-between items-center mt-6 pt-4 border-t">
                   <div className="text-sm text-gray-600">
-                    已选择 {selectedStrategies.length} 个策略，预计处理时间: {
-                      strategies
-                        .filter(s => selectedStrategies.includes(s.id))
-                        .reduce((total, s) => total + parseInt(s.estimatedTime), 0)
-                    } 分钟
+                    已选择 {selectedStrategies.length} 个策略
                   </div>
                   <div className="flex space-x-2">
                     <Button variant="outline" onClick={() => setCurrentStep('analysis')}>

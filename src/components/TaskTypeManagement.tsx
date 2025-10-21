@@ -74,7 +74,7 @@ export default function TaskTypeManagement({ isAdmin = true }: TaskTypeManagemen
   const [editorText, setEditorText] = useState<string>(JSON.stringify(currentJson, null, 2));
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [previewTab, setPreviewTab] = useState<"create" | "result">("create");
+  const [previewTab, setPreviewTab] = useState<'create'>('create');
   const [paramJsonText, setParamJsonText] = useState<string>("{}");
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [selectedRollbackVersion, setSelectedRollbackVersion] = useState<number | null>(null);
@@ -368,55 +368,6 @@ export default function TaskTypeManagement({ isAdmin = true }: TaskTypeManagemen
     );
   };
 
-  // 预览渲染（任务详情页）
-  const renderResultPreview = (config: any) => {
-    const metrics: Array<{ name: string; value: number }> = (config.output?.metrics || []).map((m: any) => ({ name: m.name, value: Number((Math.random() * 0.9 + 0.1).toFixed(4)) }));
-    const charts: string[] = config.output?.charts || [];
-    const causal = !!config.output?.enableCausalAnalysis;
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>结果指标</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-3 gap-4">
-            {metrics.map(m => (
-              <div key={m.name} className="border rounded p-3">
-                <div className="text-sm text-gray-500">{m.name}</div>
-                <div className="text-xl font-semibold">{m.value}</div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>图表组件</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
-            {charts.length === 0 && <div className="text-gray-500">未配置图表</div>}
-            {charts.map((c, idx) => (
-              <div key={`${c}-${idx}`} className="h-40 border rounded flex items-center justify-center text-sm text-gray-600 bg-gray-50">
-                图表占位：{c}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {causal && (
-          <Card>
-            <CardHeader>
-              <CardTitle>因果解释</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="h-40 border rounded flex items-center justify-center text-sm text-gray-600 bg-gray-50">因果链图占位</div>
-              <div className="p-3 border rounded text-sm text-gray-700 bg-white">模型解释：基于当前配置启用因果分析，展示影响因子的自然语言说明。</div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-    );
-  };
 
   if (!isAdmin) {
     return (
@@ -523,19 +474,13 @@ export default function TaskTypeManagement({ isAdmin = true }: TaskTypeManagemen
           <DialogHeader>
             <DialogTitle>预览渲染 - {items.find(it => it.id === selectedId)?.name}</DialogTitle>
           </DialogHeader>
-          <Tabs value={previewTab} onValueChange={(v) => setPreviewTab(v as any)} className="mt-2">
+          <Tabs value={previewTab} className="mt-2">
             <TabsList>
               <TabsTrigger value="create">任务创建预览</TabsTrigger>
-              <TabsTrigger value="result">任务结果预览</TabsTrigger>
             </TabsList>
             <TabsContent value="create" className="mt-4">
               <ScrollArea className="h-[calc(80vh-160px)] pr-2">
                 {renderCreatePreview(JSON.parse(editorText))}
-              </ScrollArea>
-            </TabsContent>
-            <TabsContent value="result" className="mt-4">
-              <ScrollArea className="h-[calc(80vh-160px)] pr-2">
-                {renderResultPreview(JSON.parse(editorText))}
               </ScrollArea>
             </TabsContent>
           </Tabs>

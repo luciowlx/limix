@@ -25,7 +25,7 @@ import {
 
 interface ProjectDetailCardsProps {
   project: any;
-  mode: 'traditional' | 'solo';
+  mode: 'traditional' | 'auto';
   onNavigateToData?: () => void;
   onNavigateToTasks?: () => void;
   onNavigateToModels?: () => void;
@@ -42,10 +42,10 @@ export function ProjectDetailCards({
   onQuickPredict,
   onViewReports
 }: ProjectDetailCardsProps) {
-  // 语音指令 & 会话记录（仅在 Solo 模式下使用）
+  // 语音指令 & 会话记录（仅在自动模式下使用）
   const [voiceInput, setVoiceInput] = React.useState('');
   const [isRecording, setIsRecording] = React.useState(false);
-  const [soloSessions, setSoloSessions] = React.useState<Array<{id: string; taskName: string; time: string; rawCommand: string; operations: string[]}>>([]);
+  const [autoSessions, setAutoSessions] = React.useState<Array<{id: string; taskName: string; time: string; rawCommand: string; operations: string[]}>>([]);
   const [expandedRecordId, setExpandedRecordId] = React.useState<string | null>(null);
 
   // 简单的语义理解示例：依据关键词生成简化任务名与预计操作
@@ -86,7 +86,7 @@ export function ProjectDetailCards({
     const { taskName, operations } = semanticSimplify(content);
     const id = `${Date.now()}`;
     const time = new Date().toLocaleString();
-    setSoloSessions((prev) => [{ id, taskName, time, rawCommand: content, operations }, ...prev]);
+    setAutoSessions((prev) => [{ id, taskName, time, rawCommand: content, operations }, ...prev]);
     setVoiceInput('');
     setExpandedRecordId(id); // 执行后默认展开详情
   };
@@ -244,7 +244,7 @@ export function ProjectDetailCards({
     );
   }
 
-  // Solo模式
+  // 自动模式（移除“Solo模式”字样）
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {/* 基本信息卡片 */}
@@ -254,7 +254,7 @@ export function ProjectDetailCards({
             <FileText className="h-5 w-5 text-blue-600" />
             基本信息
             <Badge variant="secondary" className="ml-2 bg-green-100 text-green-600">
-              Solo模式
+              自动清洗
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -341,17 +341,17 @@ export function ProjectDetailCards({
             </Button>
           </div>
 
-          {/* Solo 会话记录展示（优化左下角区域：报表/因果分析联动语音任务） */}
+          {/* 会话记录展示（优化左下角区域：报表/因果分析联动语音任务） */}
           <div className="mt-4">
             <div className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
-              本次与历史 Solo 会话记录
+              本次与历史会话记录
             </div>
-            {soloSessions.length === 0 ? (
+            {autoSessions.length === 0 ? (
               <div className="text-xs text-gray-500">暂无会话记录。通过右侧“语音指令入口”执行后，这里将展示简化任务、时间与详情入口。</div>
             ) : (
               <div className="space-y-2">
-                {soloSessions.map((s) => (
+                {autoSessions.map((s) => (
                   <div key={s.id} className="p-3 rounded border border-gray-200">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">

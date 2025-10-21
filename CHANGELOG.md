@@ -22,6 +22,20 @@
 
 ## 变更历史
 
+### 2025-10-21
+- [Feature/UI] 数据预处理：新增“数据转换（numeric_transform）”规则配置区，支持多字段选择与方法参数设置
+  - 方法：Min-Max、Z-score、Robust、Max-Abs、小数缩放、单位向量；提供默认参数与输入校验；按样本归一化在单字段时给出非阻塞提示
+  - 涉及文件：
+    - src/components/DataPreprocessing.tsx
+  - 预览：
+    - 运行 `npm run dev`；在 http://localhost:3000/ 打开“数据管理 -> 数据预处理”，新增规则类型选择“数据转换”，配置区可正常渲染与交互。
+- [Validation] 扩展 `handleApply` 对 numeric_transform 的严格校验：仅数值型字段；Min-Max 要求 min < max；Z-score 的 stdType 合法（sample/population）；Robust 的 q1/q3 在 (0,100) 且 q1<q3；Max-Abs 的 preserveSign 为布尔；小数缩放 digits 为非负整数（自动模式忽略）；单位向量 axis 合法（row/column）
+  - 涉及文件：
+    - src/components/DataPreprocessing.tsx
+- [Feature/UI] 范围值拆分（split_range）：增加“自动建议分隔符”和“检测样例”按钮；优化分隔符/正则占位符与说明文案，支持负数范围（如 -5~5）
+  - 涉及文件：
+    - src/components/DataPreprocessing.tsx
+
 ### 2025-10-16
 - [Feature/UI] 数据预处理：在“选择数据集（Step 0）”新增结构化信息面板
   - 右侧信息面板在选择数据集后即时显示：

@@ -128,4 +128,3 @@ export const blankTemplate: TaskTypeTemplate = {
     enableCausalAnalysis: false
   }
 };
-

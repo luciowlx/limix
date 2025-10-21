@@ -35,7 +35,7 @@ export default function App() {
   const [showModelTuning, setShowModelTuning] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   const [projectFormData, setProjectFormData] = useState({
-    projectMode: "", // 项目模式（traditional/solo）
+    projectMode: "", // 项目模式（traditional/auto）
     projectName: "",
     projectDescription: "",
     projectStartDate: "", // 项目开始日期
@@ -54,7 +54,7 @@ export default function App() {
   const [isProjectDetailOpen, setIsProjectDetailOpen] = useState(false);
   const [isProjectManageOpen, setIsProjectManageOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<any>(null);
-  const [projectDetailMode, setProjectDetailMode] = useState<'traditional' | 'solo'>('traditional');
+  const [projectDetailMode, setProjectDetailMode] = useState<'traditional' | 'auto'>('traditional');
   const [manageFormData, setManageFormData] = useState({
     projectName: "",
     projectDescription: "",
@@ -82,7 +82,7 @@ export default function App() {
   // 当前项目状态
   const [currentProject, setCurrentProject] = useState<{
     name: string;
-    mode: 'traditional' | 'solo';
+    mode: 'traditional' | 'auto';
   } | null>(null);
 
   // 系统管理子标签状态
@@ -261,7 +261,7 @@ export default function App() {
     // 设置当前项目
     setCurrentProject({
       name: projectFormData.projectName,
-      mode: projectFormData.projectMode as 'traditional' | 'solo'
+      mode: projectFormData.projectMode as 'traditional' | 'auto'
     });
     
     setIsCreateProjectOpen(false);
@@ -456,11 +456,11 @@ export default function App() {
   };
 
   const handleOpenSoloMode = () => {
-    // 如果没有当前项目，创建一个默认的Solo项目
-    if (!currentProject || currentProject.mode !== 'solo') {
+    // 如果没有当前项目，创建一个默认的自动模式项目
+    if (!currentProject || currentProject.mode !== 'auto') {
       setCurrentProject({
         name: "智能分析项目",
-        mode: 'solo'
+        mode: 'auto'
       });
     }
   };
@@ -473,8 +473,8 @@ export default function App() {
   const renderContent = () => {
     console.log("当前活动标签:", activeTab); // 添加调试日志
     
-    // 如果当前有项目且为Solo模式，显示Solo界面
-    if (currentProject && currentProject.mode === 'solo') {
+    // 如果当前有项目且为自动模式，显示智能界面
+    if (currentProject && currentProject.mode === 'auto') {
       return <SoloMode projectName={currentProject.name} />;
     }
     
@@ -766,23 +766,23 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Solo模式 */}
+                      {/* 自动模式 */}
                       <div 
                         className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                          projectFormData.projectMode === 'solo' 
+                          projectFormData.projectMode === 'auto' 
                             ? 'border-green-500 bg-green-50' 
                             : 'border-gray-200 hover:border-gray-300'
                         }`}
-                        onClick={() => setProjectFormData({...projectFormData, projectMode: 'solo'})}
+                        onClick={() => setProjectFormData({...projectFormData, projectMode: 'auto'})}
                       >
                         <div className="flex items-start space-x-3">
                           <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center mt-1">
-                            {projectFormData.projectMode === 'solo' && (
+                            {projectFormData.projectMode === 'auto' && (
                               <div className="w-3 h-3 rounded-full bg-green-500"></div>
                             )}
                           </div>
                           <div className="flex-1">
-                            <h3 className="font-medium text-gray-900">Solo模式 <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full ml-1">智能</span></h3>
+                            <h3 className="font-medium text-gray-900">自动模式 <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full ml-1">智能</span></h3>
                             <p className="text-sm text-gray-600 mt-1">
                               基于自然语言的智能问数系统，通过对话快速获取数据洞察和可视化图表
                             </p>
@@ -1005,7 +1005,7 @@ export default function App() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => setProjectDetailMode(projectDetailMode === 'traditional' ? 'solo' : 'traditional')}
+                          onClick={() => setProjectDetailMode(projectDetailMode === 'traditional' ? 'auto' : 'traditional')}
                           className="flex items-center gap-2"
                         >
                           {projectDetailMode === 'traditional' ? (
@@ -1016,7 +1016,7 @@ export default function App() {
                           ) : (
                             <>
                               <ToggleRight className="h-4 w-4" />
-                              Solo模式
+                              自动模式
                             </>
                           )}
                         </Button>
@@ -1443,7 +1443,7 @@ export default function App() {
   const [showTaskCompareDemo, setShowTaskCompareDemo] = useState(false);
 
   const taskCompareDemoA = {
-    info: { id: 'TASK-A', name: '缺陷识别-ResNet', dataset: '缺陷图像数据集 v1', model: 'ResNet50', params: { lr: 0.001, batch_size: 32 } },
+    info: { id: 'TASK-A', name: '缺陷识别-ResNet', dataset: '缺陷图像数据集 v1.0', model: 'ResNet50', params: { lr: 0.001, batch_size: 32 } },
     type: 'classification' as const,
     metrics: {
       accuracy: 0.9144, precision: 0.902, recall: 0.895, f1: 0.898, rocAuc: 0.945,
@@ -1475,7 +1475,7 @@ export default function App() {
   };
 
   const taskCompareDemoB = {
-    info: { id: 'TASK-B', name: '缺陷识别-EfficientNet', dataset: '缺陷图像数据集 v1', model: 'EfficientNet-B0', params: { lr: 0.0008, batch_size: 64 } },
+    info: { id: 'TASK-B', name: '缺陷识别-EfficientNet', dataset: '缺陷图像数据集 v1.0', model: 'EfficientNet-B0', params: { lr: 0.0008, batch_size: 64 } },
     type: 'classification' as const,
     metrics: {
       accuracy: 0.904, precision: 0.895, recall: 0.882, f1: 0.888, rocAuc: 0.936,

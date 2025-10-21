@@ -54,7 +54,7 @@ interface FormData {
   description: string;
   projectId: string; // 所属项目（必填）
   permission: 'private' | 'team' | 'public';
-  mode: 'traditional' | 'solo';
+  mode: 'traditional' | 'auto';
   tags: Array<{ name: string; color: string }>;
 }
 
@@ -70,13 +70,13 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     tags: []
   });
   const [isUploading, setIsUploading] = useState(false);
-  // 语义指令（仅 Solo 模式）
+  // 语义指令（仅 自动模式）
   const [semanticInstruction, setSemanticInstruction] = useState('');
   const [llmProcessing, setLlmProcessing] = useState(false);
   const [llmResult, setLlmResult] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 语音指令输入相关状态与引用（Solo 模式）
+  // 语音指令输入相关状态与引用（自动模式）
   const [isListening, setIsListening] = useState(false);
   const [speechText, setSpeechText] = useState('');
   const [speechStatus, setSpeechStatus] = useState<'idle' | 'listening' | 'processing' | 'error'>('idle');
@@ -730,27 +730,27 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
           </div>
 
           <div className="space-y-2">
-            <Label>处理模式</Label>
+            <Label>清洗方式</Label>
             <RadioGroup
               value={formData.mode}
-              onValueChange={(value: 'traditional' | 'solo') => 
+              onValueChange={(value: 'traditional' | 'auto') => 
                 setFormData(prev => ({ ...prev, mode: value }))
               }
               className="flex space-x-6"
             >
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="traditional" id="traditional" />
-                <Label htmlFor="traditional">传统模式（手动配置清洗规则）</Label>
+                <Label htmlFor="traditional">手动清洗（规则配置）</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="solo" id="solo" />
-                <Label htmlFor="solo">Solo模式（自动清洗）</Label>
+                <RadioGroupItem value="auto" id="auto" />
+                <Label htmlFor="auto">自动清洗</Label>
               </div>
             </RadioGroup>
           </div>
 
-          {/* Solo 模式：原型图示例 + 语音指令输入模块 */}
-          {formData.mode === 'solo' && (
+          {/* 自动模式：原型图示例 + 语音指令输入模块 */}
+          {formData.mode === 'auto' && (
             <div className="space-y-4">
               {/* 原型图示例区块 */}
               <Card>
@@ -776,7 +776,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                       <p className="text-xs text-gray-600 mt-1">报告与预览，支持回滚与导出</p>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-3">Solo 模式会自动分析并清洗数据，您也可以通过语音指令微调策略。</p>
+                  <p className="text-xs text-gray-500 mt-3">自动模式会自动分析并清洗数据，您也可以通过语音指令微调策略。</p>
                 </CardContent>
               </Card>
 

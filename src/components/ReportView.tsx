@@ -267,7 +267,7 @@ export function ReportView({ onClose }: ReportViewProps) {
           </Button>
           <h1 className="text-xl font-medium">分析报表</h1>
         </div>
-        <Badge variant="secondary" className="bg-slate-700 text-white">Solo模式</Badge>
+        <Badge variant="secondary" className="bg-slate-700 text-white">自动清洗</Badge>
       </div>
 
       {/* Content */}
@@ -422,7 +422,7 @@ export function ReportView({ onClose }: ReportViewProps) {
           </CardHeader>
           <CardContent>
             <div className="flex items-center flex-wrap gap-3 mb-4">
-              <Badge className="bg-indigo-50 text-indigo-700 border border-indigo-200">Solo 自动清洗</Badge>
+              <Badge className="bg-indigo-50 text-indigo-700 border border-indigo-200">自动清洗</Badge>
               <Badge className="bg-yellow-50 text-yellow-700 border border-yellow-200">缺失值填充：{processingSummary.missing}</Badge>
               <Badge className="bg-red-50 text-red-700 border border-red-200">异常值处理：{processingSummary.abnormal}</Badge>
               <Badge className="bg-blue-50 text-blue-700 border border-blue-200">类型转换：{processingSummary.typeConverted}</Badge>

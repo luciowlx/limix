@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Search, 
   Filter, 
@@ -30,7 +30,9 @@ import {
   User,
   GitCompare,
   Maximize2,
-  Minimize2
+  Minimize2,
+  X,
+  Upload,
 } from 'lucide-react';
 import { Pencil } from 'lucide-react';
 import { Button } from './ui/button';
@@ -56,6 +58,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverAnchor,
+} from './ui/popover';
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandGroup,
+  CommandItem,
+  CommandEmpty,
+} from './ui/command';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -155,6 +171,8 @@ interface DatasetInfo {
   source: 'upload' | 'subscription';
   status: 'success' | 'processing' | 'failed';
   versions: DatasetVersion[];
+  // 新增：数据集包含的文件名称列表（用于主/协变量选择）
+  files?: string[];
   previewData?: any[];
 }
 
@@ -197,11 +215,13 @@ interface FormData {
   hyperparameterMode: 'page' | 'json';
   // 页面配置：按任务类型分别保存
   forecastingConfig: {
+    // 新增：时间序列任务的时间列（来自公共字段）
+    timeColumn: string; // 时间列（必选）
     contextLength: number; // 上下文长度
     forecastLength: number; // 预测长度
     stepLength: number; // 预测步长
     startTime: string; // 预测开始时间（日期+时间）
-    mainVariableFile?: string; // 主变量文件（可选）
+    mainVariableFiles: string[]; // 主变量文件（多选）
     covariateFiles: string[]; // 协变量文件列表（可选）
   };
   classificationConfig: {
@@ -301,11 +321,12 @@ interface FormData {
     config: '',
     hyperparameterMode: 'page',
     forecastingConfig: {
+      timeColumn: '',
       contextLength: 24,
       forecastLength: 12,
       stepLength: 1,
       startTime: '',
-      mainVariableFile: undefined,
+      mainVariableFiles: [],
       covariateFiles: []
     },
     classificationConfig: {
@@ -327,10 +348,106 @@ interface FormData {
     }
   });
 
+  // JSON 配置导入错误提示
+  const [jsonImportError, setJsonImportError] = useState<string>('');
+  const importJsonInputRef = useRef<HTMLInputElement | null>(null);
+
+  // 生成标准 JSON 配置模板（根据当前任务类型预填常用字段，保留可编辑性）
+  const buildJsonTemplate = () => {
+    const baseHyper: Record<string, any> = {
+      learning_rate: 0.1,
+      max_depth: 6,
+      n_estimators: 100,
+      subsample: 0.8,
+      colsample_bytree: 0.8,
+    };
+    if (formData.taskType === 'forecasting') {
+      return {
+        mode: 'json',
+        taskType: 'forecasting',
+        forecasting: {
+          timeColumn: formData.forecastingConfig.timeColumn || 'timestamp',
+          contextLength: formData.forecastingConfig.contextLength || 24,
+          forecastLength: formData.forecastingConfig.forecastLength || 12,
+          stepLength: formData.forecastingConfig.stepLength || 1,
+          startTime: formData.forecastingConfig.startTime || '',
+          mainVariableFiles: formData.forecastingConfig.mainVariableFiles || [],
+          covariateFiles: formData.forecastingConfig.covariateFiles || [],
+        },
+        hyperparameters: baseHyper,
+      };
+    }
+    if (formData.taskType === 'classification') {
+      return {
+        mode: 'json',
+        taskType: 'classification',
+        classification: {
+          trainRatio: formData.classificationConfig.trainRatio,
+          testRatio: formData.classificationConfig.testRatio,
+          shuffle: formData.classificationConfig.shuffle,
+        },
+        hyperparameters: baseHyper,
+      };
+    }
+    // regression
+    return {
+      mode: 'json',
+      taskType: 'regression',
+      regression: {
+        trainRatio: formData.regressionConfig.trainRatio,
+        testRatio: formData.regressionConfig.testRatio,
+        shuffle: formData.regressionConfig.shuffle,
+      },
+      hyperparameters: baseHyper,
+    };
+  };
+
+  // 导出 JSON 模板文件
+  const handleExportJsonTemplate = () => {
+    try {
+      const tpl = buildJsonTemplate();
+      const dataStr = JSON.stringify(tpl, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const dateStr = new Date().toISOString().split('T')[0];
+      link.href = url;
+      link.download = `任务参数模板_${formData.taskType}_${dateStr}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('导出模板失败:', err);
+    }
+  };
+
+  // 处理导入 JSON 配置文件
+  const handleImportJsonFile = async (file: File) => {
+    setJsonImportError('');
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        setJsonImportError('导入失败：JSON 须为对象类型');
+        return;
+      }
+      const pretty = JSON.stringify(parsed, null, 2);
+      handleInputChange('manualConfig', pretty);
+    } catch (err) {
+      console.error('导入 JSON 解析错误:', err);
+      setJsonImportError('导入失败：JSON 解析错误，请检查文件内容');
+    }
+  };
+
   // 添加表单验证状态
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDatasetPreview, setShowDatasetPreview] = useState(false);
+
+  // 第4步：主/协变量文件多选弹窗状态与搜索词
+  const [mainFilesOpen, setMainFilesOpen] = useState(false);
+  const [covFilesOpen, setCovFilesOpen] = useState(false);
+  const [mainFilesQuery, setMainFilesQuery] = useState('');
+  const [covFilesQuery, setCovFilesQuery] = useState('');
 
   // 模拟数据集详细信息
   const [availableDatasets] = useState<DatasetInfo[]>([
@@ -343,9 +460,15 @@ interface FormData {
       sampleCount: 10000,
       source: 'upload',
       status: 'success',
+      files: [
+        '生产线_主变量.csv',
+        '生产线_协变量_设备功率.csv',
+        '生产线_协变量_环境温度.csv',
+        '生产线_日志.csv'
+      ],
       versions: [
         {
-          version: 'v3',
+          version: 'v3.0',
           createdAt: '2025-01-15 14:30',
           description: '修复数据质量问题，增加新特征',
           size: '2.5MB',
@@ -353,7 +476,7 @@ interface FormData {
           sampleCount: 10000
         },
         {
-          version: 'v2',
+          version: 'v2.0',
           createdAt: '2025-01-10 10:20',
           description: '数据清洗优化，移除异常值',
           size: '2.3MB',
@@ -361,7 +484,7 @@ interface FormData {
           sampleCount: 9800
         },
         {
-          version: 'v1',
+          version: 'v1.0',
           createdAt: '2025-01-05 16:45',
           description: '初始版本',
           size: '2.1MB',
@@ -384,9 +507,14 @@ interface FormData {
       sampleCount: 25000,
       source: 'subscription',
       status: 'success',
+      files: [
+        '客户_主变量.csv',
+        '客户_协变量_画像.csv',
+        '客户_交易明细.csv'
+      ],
       versions: [
         {
-          version: 'v2',
+          version: 'v2.0',
           createdAt: '2025-01-12 09:15',
           description: '增加用户画像特征',
           size: '5.2MB',
@@ -394,7 +522,7 @@ interface FormData {
           sampleCount: 25000
         },
         {
-          version: 'v1',
+          version: 'v1.0',
           createdAt: '2025-01-08 11:30',
           description: '基础行为数据',
           size: '4.8MB',
@@ -435,11 +563,109 @@ interface FormData {
     });
   }, [formData.selectedDatasets, availableDatasets]);
 
+  // 当公共字段（availableFields）变化时，校正或自动预填时间列
+  useEffect(() => {
+    if (formData.taskType !== 'forecasting') return;
+    const fields = formData.availableFields || [];
+    const current = formData.forecastingConfig?.timeColumn || '';
+    // 如果当前时间列不在公共字段中，则清空
+    if (current && !fields.includes(current)) {
+      setFormData(prev => ({
+        ...prev,
+        forecastingConfig: { ...prev.forecastingConfig, timeColumn: '' }
+      }));
+      return;
+    }
+    // 若为空且存在常见时间字段名，自动预填
+    if (!current && fields.length > 0) {
+      const candidates = ['timestamp', 'time', 'date', 'datetime', 'event_time', 'ts'];
+      const found = candidates.find(c => fields.includes(c));
+      if (found) {
+        setFormData(prev => ({
+          ...prev,
+          forecastingConfig: { ...prev.forecastingConfig, timeColumn: found }
+        }));
+      }
+    }
+  }, [formData.availableFields, formData.taskType]);
+
+  // 聚合可选文件名：来自已选数据集(selectedDatasets)与当前选择(selectedDataset)
+  const aggregatedFileOptions = useMemo(() => {
+    const set = new Set<string>();
+    // 来自多数据集选择
+    formData.selectedDatasets.forEach(sd => {
+      const ds = availableDatasets.find(d => d.id === sd.id);
+      ds?.files?.forEach(f => set.add(f));
+    });
+    // 来自当前选中的数据集（如果未在 selectedDatasets 中）
+    if (formData.selectedDataset) {
+      const inList = formData.selectedDatasets.some(sd => sd.id === formData.selectedDataset?.id);
+      if (!inList) {
+        const ds = availableDatasets.find(d => d.id === formData.selectedDataset?.id) || formData.selectedDataset;
+        ds?.files?.forEach(f => set.add(f));
+      }
+    }
+    return Array.from(set);
+  }, [formData.selectedDatasets, formData.selectedDataset, availableDatasets]);
+
+  // 互斥后的主/协变量候选项 + 搜索过滤
+  const filteredMainOptions = useMemo(() => {
+    const exclude = new Set(formData.forecastingConfig.covariateFiles || []);
+    return aggregatedFileOptions
+      .filter(f => !exclude.has(f))
+      .filter(f => (mainFilesQuery ? f.toLowerCase().includes(mainFilesQuery.toLowerCase()) : true));
+  }, [aggregatedFileOptions, formData.forecastingConfig.covariateFiles, mainFilesQuery]);
+
+  const filteredCovOptions = useMemo(() => {
+    const exclude = new Set(formData.forecastingConfig.mainVariableFiles || []);
+    return aggregatedFileOptions
+      .filter(f => !exclude.has(f))
+      .filter(f => (covFilesQuery ? f.toLowerCase().includes(covFilesQuery.toLowerCase()) : true));
+  }, [aggregatedFileOptions, formData.forecastingConfig.mainVariableFiles, covFilesQuery]);
+
+  // 选择/取消选择主变量文件（并从协变量中移除，保持互斥）
+  const toggleMainFile = (file: string) => {
+    const selected = formData.forecastingConfig.mainVariableFiles || [];
+    const isChecked = selected.includes(file);
+    const nextMain = isChecked ? selected.filter(f => f !== file) : [...selected, file];
+    const nextCov = (formData.forecastingConfig.covariateFiles || []).filter(f => !nextMain.includes(f));
+    handleInputChange('forecastingConfig', {
+      ...formData.forecastingConfig,
+      mainVariableFiles: nextMain,
+      covariateFiles: nextCov,
+    });
+  };
+
+  // 选择/取消选择协变量文件（并从主变量中移除，保持互斥）
+  const toggleCovFile = (file: string) => {
+    const selected = formData.forecastingConfig.covariateFiles || [];
+    const isChecked = selected.includes(file);
+    const nextCov = isChecked ? selected.filter(f => f !== file) : [...selected, file];
+    const nextMain = (formData.forecastingConfig.mainVariableFiles || []).filter(f => !nextCov.includes(f));
+    handleInputChange('forecastingConfig', {
+      ...formData.forecastingConfig,
+      mainVariableFiles: nextMain,
+      covariateFiles: nextCov,
+    });
+  };
+
   const [availableModels] = useState([
+    { 
+      id: 'MODEL-006',
+      name: 'Limix',
+      type: '大模型',
+      status: 'available',
+      description: 'limix自研结构化数据大模型，支持多种任务',
+      accuracy: '95.2%',
+      size: '78.9MB',
+      supportedTasks: ['classification', 'regression', 'forecasting'],
+      trainingTime: '自动调参',
+      features: ['模型集成', '无需专业知识']
+    },
     { 
       id: 'MODEL-001', 
       name: 'XGBoost分类器', 
-      type: '自研模型', 
+      type: '三方模型', 
       status: 'available',
       description: '基于梯度提升的高性能分类算法，适用于结构化数据分类任务',
       accuracy: '92.5%',
@@ -451,7 +677,7 @@ interface FormData {
     { 
       id: 'MODEL-002', 
       name: 'LightGBM回归器', 
-      type: '自研模型', 
+      type: '三方模型', 
       status: 'available',
       description: '轻量级梯度提升框架，专为回归任务优化',
       accuracy: '89.3%',
@@ -463,7 +689,7 @@ interface FormData {
     { 
       id: 'MODEL-003', 
       name: '神经网络模型', 
-      type: '微调模型', 
+      type: '三方模型', 
       status: 'available',
       description: '深度学习神经网络，适用于复杂模式识别',
       accuracy: '94.1%',
@@ -475,7 +701,7 @@ interface FormData {
     { 
       id: 'MODEL-004', 
       name: '随机森林', 
-      type: '第三方模型', 
+      type: '三方模型', 
       status: 'available',
       description: '集成学习算法，通过多个决策树提高预测准确性',
       accuracy: '87.8%',
@@ -487,7 +713,7 @@ interface FormData {
     { 
       id: 'MODEL-005', 
       name: 'AutoGluon-Tabular', 
-      type: 'AutoML模型', 
+      type: '三方模型', 
       status: 'available',
       description: 'AutoML自动机器学习框架，自动选择最优模型',
       accuracy: '95.2%',
@@ -593,10 +819,10 @@ interface FormData {
       taskType: 'forecasting',
       projectId: 'proj_002',
       datasetName: '生产质量数据集',
-      datasetVersion: 'v3',
+      datasetVersion: 'v3.0',
       datasets: [
-        { id: 'DATA-2025-001', name: '生产质量数据集', version: 'v3' },
-        { id: 'DATA-2025-002', name: '客户行为数据集', version: 'v2' }
+        { id: 'DATA-2025-001', name: '生产质量数据集', version: 'v3.0' },
+        { id: 'DATA-2025-002', name: '客户行为数据集', version: 'v2.0' }
       ],
       modelName: 'AutoGluon-Tabular',
       priority: 'high',
@@ -798,17 +1024,11 @@ interface FormData {
       errors.targetFields = '最多只能选择10个目标字段';
     }
 
-    // 模型选择验证
-    if (formData.modelSelectionMode === 'single') {
-      if (!formData.modelName) {
-        errors.modelName = '请选择一个模型';
-      }
-    } else {
-      if (formData.models.length === 0) {
-        errors.models = '请至少选择一个模型';
-      } else if (formData.models.length > 5) {
-        errors.models = '最多只能选择5个模型进行并行训练';
-      }
+    // 模型选择验证（默认多选）
+    if (formData.models.length === 0) {
+      errors.models = '请至少选择一个模型';
+    } else if (formData.models.length > 5) {
+      errors.models = '最多只能选择5个模型进行并行训练';
     }
 
     // 超参数/任务配置验证
@@ -816,6 +1036,12 @@ interface FormData {
       // 根据任务类型校验对应的页面配置
       if (formData.taskType === 'forecasting') {
         const fc = formData.forecastingConfig;
+        // 时间列必选且必须来自公共字段
+        if (!fc || !String(fc.timeColumn || '').trim()) {
+          errors.forecastingTimeColumn = '请选择时间列（来自公共字段）';
+        } else if (!formData.availableFields.includes(fc.timeColumn)) {
+          errors.forecastingTimeColumn = '时间列必须来自已选数据集的公共字段';
+        }
         if (!fc || fc.contextLength < 1 || fc.contextLength > 10000) {
           errors.forecastingContextLength = '上下文长度应在1-10000之间';
         }
@@ -923,6 +1149,12 @@ interface FormData {
 
       // 将表单数据映射为 Task 类型，并追加到任务列表
       const nowIso = new Date().toISOString();
+      // 将所选模型ID映射为名称，用于摘要展示
+      const selectedModelNames = formData.models.map(id => {
+        const m = availableModels.find(mm => mm.id === id);
+        return m?.name || id;
+      });
+
       const newTask: Task = {
         id: nextId,
         taskName: formData.taskName,
@@ -932,11 +1164,9 @@ interface FormData {
         datasetName: payload.datasetName || '',
         datasetVersion: payload.datasetVersion || '',
         datasets: formData.selectedDatasets.length > 0 ? formData.selectedDatasets : undefined,
-        modelName: formData.modelSelectionMode === 'single'
-          ? formData.modelName
-          : (formData.models.length > 0
-              ? `${formData.models[0]} 等 ${formData.models.length} 个模型`
-              : '未选择模型'),
+        modelName: (selectedModelNames.length > 0
+          ? `${selectedModelNames[0]} 等 ${selectedModelNames.length} 个模型`
+          : '未选择模型'),
         priority: formData.priority,
         status: 'pending',
         progress: 0,
@@ -949,7 +1179,11 @@ interface FormData {
           : (() => {
               const base: any = { mode: 'page', taskType: formData.taskType };
               if (formData.taskType === 'forecasting') {
-                base.forecasting = { ...formData.forecastingConfig };
+                // 兼容后端旧字段：mainVariableFile 取 mainVariableFiles[0]
+                base.forecasting = {
+                  ...formData.forecastingConfig,
+                  mainVariableFile: formData.forecastingConfig?.mainVariableFiles?.[0] || undefined,
+                };
               } else if (formData.taskType === 'classification') {
                 base.classification = { ...formData.classificationConfig };
               } else if (formData.taskType === 'regression') {
@@ -1211,6 +1445,26 @@ interface FormData {
       const availableFields = matchedDataset?.previewData && matchedDataset.previewData.length > 0
         ? Object.keys(matchedDataset.previewData[0])
         : [];
+      // 从任务的模型摘要中尽可能解析出已选择的模型名称（兼容“Limix 等 N 个模型”或逗号/顿号分隔的形式）
+      const parsedModels = (() => {
+        const name = task.modelName || '';
+        if (!name || /未选择模型/.test(name)) return [];
+        // 处理“xxx 等 N 个模型”
+        if (name.includes('等') && name.includes('模型')) {
+          const first = name.split('等')[0].trim();
+          return first ? [first] : [];
+        }
+        // 处理逗号/顿号/分号分隔
+        return name
+          .split(/[，,、;]+/)
+          .map(s => s.trim())
+          .filter(Boolean);
+      })();
+      // 将解析出的模型名称转换为可识别的模型ID
+      const nameToId = new Map<string, string>(availableModels.map(m => [m.name, m.id]));
+      const editModels = parsedModels
+        .map(n => nameToId.get(n))
+        .filter((id): id is string => Boolean(id));
       setFormData(prev => ({
         ...prev,
         taskName: task.taskName,
@@ -1220,9 +1474,9 @@ interface FormData {
         datasetVersion: task.datasetVersion || '',
         selectedDataset: matchedDataset || null,
         selectedDatasets: task.datasets ?? [],
-        modelSelectionMode: 'single',
+        modelSelectionMode: 'multiple',
         modelName: task.modelName,
-        models: [],
+        models: editModels,
         targetFields: [],
         availableFields,
         priority: task.priority,
@@ -1231,19 +1485,24 @@ interface FormData {
         hyperparameterMode: typeof task.config === 'string' ? 'json' : 'page',
         forecastingConfig: (typeof task.config === 'object' && task.config?.forecasting)
           ? {
+              timeColumn: task.config.forecasting.timeColumn ?? '',
               contextLength: task.config.forecasting.contextLength ?? 24,
               forecastLength: task.config.forecasting.forecastLength ?? 12,
               stepLength: task.config.forecasting.stepLength ?? 1,
               startTime: task.config.forecasting.startTime ?? '',
-              mainVariableFile: task.config.forecasting.mainVariableFile,
+              // 兼容旧数据：如果只存在 mainVariableFile，则转为数组
+              mainVariableFiles: (task.config.forecasting.mainVariableFiles
+                ? task.config.forecasting.mainVariableFiles
+                : (task.config.forecasting.mainVariableFile ? [task.config.forecasting.mainVariableFile] : [])),
               covariateFiles: task.config.forecasting.covariateFiles ?? []
             }
           : {
+              timeColumn: '',
               contextLength: 24,
               forecastLength: 12,
               stepLength: 1,
               startTime: '',
-              mainVariableFile: undefined,
+              mainVariableFiles: [],
               covariateFiles: []
             },
         classificationConfig: (typeof task.config === 'object' && task.config?.classification)
@@ -1389,7 +1648,7 @@ interface FormData {
 
   // 示例对比数据（分类任务）
   const taskCompareDemoA = {
-    info: { id: 'TC-A', name: '分类任务 A', dataset: 'CreditRisk v1', model: 'AutoGluon (v0.8)' },
+    info: { id: 'TC-A', name: '分类任务 A', dataset: 'CreditRisk v1.0', model: 'AutoGluon (v0.8)' },
     type: 'classification' as const,
     metrics: {
       accuracy: 0.86,
@@ -1430,7 +1689,7 @@ interface FormData {
   };
 
   const taskCompareDemoB = {
-    info: { id: 'TC-B', name: '分类任务 B', dataset: 'CreditRisk v1', model: 'LimX (v1.2)' },
+    info: { id: 'TC-B', name: '分类任务 B', dataset: 'CreditRisk v1.0', model: 'LimX (v1.2)' },
     type: 'classification' as const,
     metrics: {
       accuracy: 0.90,
@@ -1472,7 +1731,7 @@ interface FormData {
 
   // 示例对比数据（回归任务）
   const taskCompareRegA = {
-    info: { id: 'TR-A', name: '回归任务 A', dataset: 'HousePrice v2', model: 'XGBoostRegressor (v1.0)' },
+    info: { id: 'TR-A', name: '回归任务 A', dataset: 'HousePrice v2.0', model: 'XGBoostRegressor (v1.0)' },
     type: 'regression' as const,
     metrics: {
       mse: 0.024,
@@ -1507,7 +1766,7 @@ interface FormData {
   };
 
   const taskCompareRegB = {
-    info: { id: 'TR-B', name: '回归任务 B', dataset: 'HousePrice v2', model: 'LightGBMRegressor (v3.2)' },
+    info: { id: 'TR-B', name: '回归任务 B', dataset: 'HousePrice v2.0', model: 'LightGBMRegressor (v3.2)' },
     type: 'regression' as const,
     metrics: {
       mse: 0.020,
@@ -1547,7 +1806,7 @@ interface FormData {
     return actual;
   });
   const taskCompareFctA = {
-    info: { id: 'TF-A', name: '时序预测任务 A', dataset: 'EnergyLoad v1', model: 'Prophet (v1.1)' },
+    info: { id: 'TF-A', name: '时序预测任务 A', dataset: 'EnergyLoad v1.0', model: 'Prophet (v1.1)' },
     type: 'forecasting' as const,
     metrics: (() => {
       const series = forecastSeriesBase.map((a, t) => ({ t, actual: a, predicted: a * (1 + ((Math.random() - 0.5) * 0.06)) }));
@@ -1584,7 +1843,7 @@ interface FormData {
   };
 
   const taskCompareFctB = {
-    info: { id: 'TF-B', name: '时序预测任务 B', dataset: 'EnergyLoad v1', model: 'AutoTS (v0.6)' },
+    info: { id: 'TF-B', name: '时序预测任务 B', dataset: 'EnergyLoad v1.0', model: 'AutoTS (v0.6)' },
     type: 'forecasting' as const,
     metrics: (() => {
       const series = forecastSeriesBase.map((a, t) => ({ t, actual: a, predicted: a * (1 + ((Math.random() - 0.5) * 0.04)) }));
@@ -1700,14 +1959,14 @@ interface FormData {
                 description: '',
                 config: '',
                 hyperparameterMode: 'page',
-                forecastingConfig: {
-                  contextLength: 24,
-                  forecastLength: 12,
-                  stepLength: 1,
-                  startTime: '',
-                  mainVariableFile: undefined,
-                  covariateFiles: []
-                },
+              forecastingConfig: {
+                contextLength: 24,
+                forecastLength: 12,
+                stepLength: 1,
+                startTime: '',
+                mainVariableFiles: [],
+                covariateFiles: []
+              },
                 classificationConfig: {
                   trainRatio: 80,
                   testRatio: 20,
@@ -2353,29 +2612,7 @@ interface FormData {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {/* 模型选择模式 */}
-                    <div>
-                      <Label className="text-sm font-medium">选择模式</Label>
-                      <RadioGroup
-                        value={formData.modelSelectionMode}
-                        onValueChange={(value: 'single' | 'multiple') => {
-                          handleInputChange('modelSelectionMode', value);
-                          // 切换模式时清空已选择的模型
-                          handleInputChange('models', []);
-                          handleInputChange('modelName', '');
-                        }}
-                        className="flex space-x-4 mt-2"
-                      >
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="single" id="single" />
-                          <Label htmlFor="single" className="text-sm">单模型运行</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="multiple" id="multiple" />
-                          <Label htmlFor="multiple" className="text-sm">多模型对比</Label>
-                        </div>
-                      </RadioGroup>
-                    </div>
+                    {/* 模型选择模式：移除单/多切换，默认多选 */}
 
                     {/* 模型选择 */}
                     <div>
@@ -2383,161 +2620,86 @@ interface FormData {
                         <span>模型选择</span>
                         <span className="text-red-500">*</span>
                       </Label>
-                      <p className="text-sm text-gray-500 mb-3">
-                        {formData.modelSelectionMode === 'single' 
-                          ? '选择一个模型进行训练' 
-                          : '选择多个模型进行并行运行和对比'
-                        }
-                      </p>
+                      <p className="text-sm text-gray-500 mb-3">选择多个模型进行并行运行和对比</p>
                       
-                      {formData.modelSelectionMode === 'single' ? (
-                        // 单选模式
-                        <div className="space-y-2">
-                          {availableModels
-                            .filter(model => model.status === 'available')
-                            .map(model => (
-                              <div 
-                                key={model.id} 
-                                className={`border rounded-lg p-3 cursor-pointer transition-colors ${
-                                  formData.modelName === model.id 
-                                    ? 'border-blue-500 bg-blue-50' 
-                                    : 'border-gray-200 hover:border-gray-300'
-                                }`}
-                                onClick={() => handleInputChange('modelName', model.id)}
-                              >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center space-x-2 mb-1">
-                                      <span className="font-medium">{model.name}</span>
-                                      <Badge variant="secondary" className="text-xs">
-                                        {model.type}
+                      {/* 多选模式（默认） */}
+                      <div className="space-y-2">
+                        {availableModels
+                          // 创建任务步骤：隐藏 神经网络模型、随机森林、AutoGluon 相关选项
+                          .filter(model => 
+                            model.status === 'available' &&
+                            !['神经网络模型', '随机森林', 'AutoGluon-Tabular', 'AutoGluon'].includes(model.name)
+                          )
+                          .map(model => (
+                            <div 
+                              key={model.id} 
+                              className={`border rounded-lg p-3 cursor-pointer transition-colors ${
+                                formData.models.includes(model.id) 
+                                  ? 'border-blue-500 bg-blue-50' 
+                                  : 'border-gray-200 hover:border-gray-300'
+                              }`}
+                              onClick={() => {
+                                const newModels = formData.models.includes(model.id)
+                                  ? formData.models.filter(id => id !== model.id)
+                                  : [...formData.models, model.id];
+                                handleInputChange('models', newModels);
+                              }}
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-2 mb-1">
+                                    <span className="font-medium">{model.name}</span>
+                                    <Badge variant="secondary" className="text-xs">
+                                      {model.type}
+                                    </Badge>
+                                    {model.accuracy && (
+                                      <Badge variant="outline" className="text-xs">
+                                        准确率: {model.accuracy}
                                       </Badge>
-                                      {model.accuracy && (
-                                        <Badge variant="outline" className="text-xs">
-                                          准确率: {model.accuracy}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    <p className="text-sm text-gray-600 mb-2">{model.description}</p>
-                                    <div className="flex items-center space-x-4 text-xs text-gray-500">
-                                      <span>大小: {model.size}</span>
-                                      <span>训练时间: {model.trainingTime}</span>
-                                      <span>支持任务: {model.supportedTasks?.join(', ')}</span>
-                                    </div>
-                                    {model.features && (
-                                      <div className="flex flex-wrap gap-1 mt-2">
-                                        {model.features.map((feature, index) => (
-                                          <Badge key={index} variant="outline" className="text-xs">
-                                            {feature}
-                                          </Badge>
-                                        ))}
-                                      </div>
                                     )}
                                   </div>
-                                  <div className="ml-3">
-                                    <div className={`w-4 h-4 rounded-full border-2 ${
-                                      formData.modelName === model.id 
-                                        ? 'border-blue-500 bg-blue-500' 
-                                        : 'border-gray-300'
-                                    }`}>
-                                      {formData.modelName === model.id && (
-                                        <div className="w-2 h-2 bg-white rounded-full m-0.5"></div>
-                                      )}
-                                    </div>
+                                  <p className="text-sm text-gray-600 mb-2">{model.description}</p>
+                                  <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                    <span>大小: {model.size}</span>
+                                    <span>支持任务: {model.supportedTasks?.join(', ')}</span>
                                   </div>
-                                </div>
-                              </div>
-                            ))}
-                        </div>
-                      ) : (
-                        // 多选模式
-                        <div className="space-y-2">
-                          {availableModels
-                            .filter(model => model.status === 'available')
-                            .map(model => (
-                              <div 
-                                key={model.id} 
-                                className={`border rounded-lg p-3 cursor-pointer transition-colors ${
-                                  formData.models.includes(model.id) 
-                                    ? 'border-blue-500 bg-blue-50' 
-                                    : 'border-gray-200 hover:border-gray-300'
-                                }`}
-                                onClick={() => {
-                                  const newModels = formData.models.includes(model.id)
-                                    ? formData.models.filter(id => id !== model.id)
-                                    : [...formData.models, model.id];
-                                  handleInputChange('models', newModels);
-                                }}
-                              >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center space-x-2 mb-1">
-                                      <span className="font-medium">{model.name}</span>
-                                      <Badge variant="secondary" className="text-xs">
-                                        {model.type}
-                                      </Badge>
-                                      {model.accuracy && (
-                                        <Badge variant="outline" className="text-xs">
-                                          准确率: {model.accuracy}
+                                  {model.features && (
+                                    <div className="flex flex-wrap gap-1 mt-2">
+                                      {model.features.map((feature, index) => (
+                                        <Badge key={index} variant="outline" className="text-xs">
+                                          {feature}
                                         </Badge>
-                                      )}
+                                      ))}
                                     </div>
-                                    <p className="text-sm text-gray-600 mb-2">{model.description}</p>
-                                    <div className="flex items-center space-x-4 text-xs text-gray-500">
-                                      <span>大小: {model.size}</span>
-                                      <span>训练时间: {model.trainingTime}</span>
-                                      <span>支持任务: {model.supportedTasks?.join(', ')}</span>
-                                    </div>
-                                    {model.features && (
-                                      <div className="flex flex-wrap gap-1 mt-2">
-                                        {model.features.map((feature, index) => (
-                                          <Badge key={index} variant="outline" className="text-xs">
-                                            {feature}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="ml-3">
-                                    <Checkbox
-                                      checked={formData.models.includes(model.id)}
-                                      onCheckedChange={() => {}}
-                                    />
-                                  </div>
+                                  )}
+                                </div>
+                                <div className="ml-3">
+                                  <Checkbox
+                                    checked={formData.models.includes(model.id)}
+                                    onCheckedChange={() => {}}
+                                  />
                                 </div>
                               </div>
-                            ))}
-                        </div>
-                      )}
+                            </div>
+                          ))}
+                      </div>
                       
                       {/* 已选择模型的摘要 */}
-                      {((formData.modelSelectionMode === 'single' && formData.modelName) || 
-                        (formData.modelSelectionMode === 'multiple' && formData.models.length > 0)) && (
+                      {(formData.models.length > 0) && (
                         <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                           <p className="text-sm font-medium mb-2">已选择的模型:</p>
                           <div className="flex flex-wrap gap-2">
-                            {formData.modelSelectionMode === 'single' ? (
-                              formData.modelName && (
-                                <Badge variant="default">
-                                  {availableModels.find(m => m.id === formData.modelName)?.name}
-                                </Badge>
-                              )
-                            ) : (
-                              formData.models.map(modelId => (
-                                <Badge key={modelId} variant="default">
-                                  {availableModels.find(m => m.id === modelId)?.name}
-                                </Badge>
-                              ))
-                            )}
+                            {formData.models.map(modelId => (
+                              <Badge key={modelId} variant="default">
+                                {availableModels.find(m => m.id === modelId)?.name}
+                              </Badge>
+                            ))}
                           </div>
                         </div>
                       )}
                       
                       {formErrors.models && (
                         <p className="text-sm text-red-500 mt-1">{formErrors.models}</p>
-                      )}
-                      {formErrors.modelName && (
-                        <p className="text-sm text-red-500 mt-1">{formErrors.modelName}</p>
                       )}
                     </div>
                   </CardContent>
@@ -2586,6 +2748,41 @@ interface FormData {
 
                         {formData.taskType === 'forecasting' && (
                           <div className="space-y-4">
+                            {/* 时间列：来源于第2步选择的数据集公共字段 */}
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label htmlFor="timeColumn" className="flex items-center space-x-1">
+                                  <span>时间列</span>
+                                  <span className="text-red-500">*</span>
+                                </Label>
+                                {formData.availableFields.length > 0 ? (
+                                  <Select
+                                    value={formData.forecastingConfig.timeColumn || ''}
+                                    onValueChange={(value) =>
+                                      handleInputChange('forecastingConfig', {
+                                        ...formData.forecastingConfig,
+                                        timeColumn: value,
+                                      })
+                                    }
+                                  >
+                                    <SelectTrigger className={formErrors.forecastingTimeColumn ? 'border-red-500' : ''}>
+                                      <SelectValue placeholder="选择来源于公共字段的时间列" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {formData.availableFields.map((field) => (
+                                        <SelectItem key={field} value={field}>{field}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                ) : (
+                                  <Input id="timeColumn" disabled placeholder="请先在第2步选择数据集以获取公共字段" />
+                                )}
+                                {formErrors.forecastingTimeColumn && (
+                                  <p className="text-xs text-red-500 mt-1">{formErrors.forecastingTimeColumn}</p>
+                                )}
+                                <p className="text-xs text-gray-500 mt-1">提示：时间列来源于第2步所选数据集的公共字段，确保数据一致性。</p>
+                              </div>
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
                               <div>
                                 <Label htmlFor="contextLength" className="flex items-center space-x-1">
@@ -2667,32 +2864,115 @@ interface FormData {
                               </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
+                              {/* 主变量文件（多选） */}
                               <div>
-                                <Label htmlFor="mainVariableFile">主变量文件(可选)</Label>
-                                <Input
-                                  id="mainVariableFile"
-                                  type="text"
-                                  value={formData.forecastingConfig.mainVariableFile || ''}
-                                  onChange={(e) => handleInputChange('forecastingConfig', {
-                                    ...formData.forecastingConfig,
-                                    mainVariableFile: e.target.value || undefined
-                                  })}
-                                />
+                                <Label className="flex items-center gap-1">主变量文件<small className="text-gray-500">(可选，互斥)</small></Label>
+                                <Popover open={mainFilesOpen} onOpenChange={setMainFilesOpen}>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="outline" role="combobox" aria-expanded={mainFilesOpen} className="w-full justify-between">
+                                      {formData.forecastingConfig.mainVariableFiles.length > 0
+                                        ? `已选择 ${formData.forecastingConfig.mainVariableFiles.length} 个文件`
+                                        : '选择主变量文件'}
+                                      <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-[420px] p-0" align="start">
+                                    <Command shouldFilter={false}>
+                                      <CommandInput placeholder="搜索文件..." value={mainFilesQuery} onValueChange={setMainFilesQuery} />
+                                      <CommandList>
+                                        <CommandEmpty>没有匹配的文件</CommandEmpty>
+                                        <CommandGroup heading="可选文件">
+                                          {filteredMainOptions.map((file) => {
+                                            const checked = formData.forecastingConfig.mainVariableFiles.includes(file);
+                                            return (
+                                              <CommandItem key={file} onSelect={() => toggleMainFile(file)}>
+                                                <Checkbox
+                                                  checked={checked}
+                                                  onCheckedChange={() => toggleMainFile(file)}
+                                                  className="mr-2"
+                                                />
+                                                <span className="truncate">{file}</span>
+                                              </CommandItem>
+                                            );
+                                          })}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {formData.forecastingConfig.mainVariableFiles.map((file) => (
+                                    <Badge key={file} variant="secondary" className="flex items-center gap-1">
+                                      <span className="truncate max-w-[200px]">{file}</span>
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center justify-center p-0.5 rounded hover:bg-muted"
+                                        onClick={() => toggleMainFile(file)}
+                                        aria-label={`移除 ${file}`}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                  {formData.forecastingConfig.mainVariableFiles.length > 0 && (
+                                    <Button variant="ghost" size="sm" onClick={() => handleInputChange('forecastingConfig', { ...formData.forecastingConfig, mainVariableFiles: [] })}>清空</Button>
+                                  )}
+                                </div>
                               </div>
+                              {/* 协变量文件（多选） */}
                               <div>
-                                <Label htmlFor="covariateFiles">协变量文件(逗号分隔)</Label>
-                                <Input
-                                  id="covariateFiles"
-                                  type="text"
-                                  value={formData.forecastingConfig.covariateFiles.join(',')}
-                                  onChange={(e) => handleInputChange('forecastingConfig', {
-                                    ...formData.forecastingConfig,
-                                    covariateFiles: e.target.value
-                                      .split(',')
-                                      .map(s => s.trim())
-                                      .filter(Boolean)
-                                  })}
-                                />
+                                <Label className="flex items-center gap-1">协变量文件<small className="text-gray-500">(多选，互斥)</small></Label>
+                                <Popover open={covFilesOpen} onOpenChange={setCovFilesOpen}>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="outline" role="combobox" aria-expanded={covFilesOpen} className="w-full justify-between">
+                                      {formData.forecastingConfig.covariateFiles.length > 0
+                                        ? `已选择 ${formData.forecastingConfig.covariateFiles.length} 个文件`
+                                        : '选择协变量文件'}
+                                      <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-[420px] p-0" align="start">
+                                    <Command shouldFilter={false}>
+                                      <CommandInput placeholder="搜索文件..." value={covFilesQuery} onValueChange={setCovFilesQuery} />
+                                      <CommandList>
+                                        <CommandEmpty>没有匹配的文件</CommandEmpty>
+                                        <CommandGroup heading="可选文件">
+                                          {filteredCovOptions.map((file) => {
+                                            const checked = formData.forecastingConfig.covariateFiles.includes(file);
+                                            return (
+                                              <CommandItem key={file} onSelect={() => toggleCovFile(file)}>
+                                                <Checkbox
+                                                  checked={checked}
+                                                  onCheckedChange={() => toggleCovFile(file)}
+                                                  className="mr-2"
+                                                />
+                                                <span className="truncate">{file}</span>
+                                              </CommandItem>
+                                            );
+                                          })}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {formData.forecastingConfig.covariateFiles.map((file) => (
+                                    <Badge key={file} variant="secondary" className="flex items-center gap-1">
+                                      <span className="truncate max-w-[200px]">{file}</span>
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center justify-center p-0.5 rounded hover:bg-muted"
+                                        onClick={() => toggleCovFile(file)}
+                                        aria-label={`移除 ${file}`}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                  {formData.forecastingConfig.covariateFiles.length > 0 && (
+                                    <Button variant="ghost" size="sm" onClick={() => handleInputChange('forecastingConfig', { ...formData.forecastingConfig, covariateFiles: [] })}>清空</Button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -2848,28 +3128,62 @@ interface FormData {
                             rows={8}
                             className="font-mono text-sm mt-1"
                           />
-                          <div className="flex items-start space-x-2 mt-2">
-                            <div className="flex-1">
+                          <div className="flex items-start mt-2 justify-between">
+                            <div className="flex-1 pr-4">
                               <p className="text-sm text-gray-600">
-                        请输入有效的JSON格式参数配置。系统会进行格式校验和参数范围检查。
+                                请输入有效的 JSON 参数配置。可直接粘贴或上传 JSON 文件，或使用系统模板快速开始。
                               </p>
+                              {jsonImportError && (
+                                <p className="text-xs text-red-500 mt-1">{jsonImportError}</p>
+                              )}
                             </div>
-                            <Button 
-                              type="button" 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => {
-                                // 这里可以添加参数模板功能
-                                const template = {
-                                  learning_rate: 0.1,
-                                  max_depth: 6,
-                                  n_estimators: 100
-                                };
-                                handleInputChange('manualConfig', JSON.stringify(template, null, 2));
-                              }}
-                            >
-                              使用模板
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button 
+                                type="button" 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => {
+                                  const tplObj = buildJsonTemplate();
+                                  handleInputChange('manualConfig', JSON.stringify(tplObj, null, 2));
+                                }}
+                                className="flex items-center space-x-1"
+                              >
+                                <Settings className="h-4 w-4" />
+                                <span>使用模板</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleExportJsonTemplate}
+                                className="flex items-center space-x-1"
+                              >
+                                <Download className="h-4 w-4" />
+                                <span>导出模板</span>
+                              </Button>
+                              <input
+                                ref={importJsonInputRef}
+                                type="file"
+                                accept="application/json,.json"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleImportJsonFile(file);
+                                  // 清空同名文件再次选择的阻塞
+                                  e.currentTarget.value = '';
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => importJsonInputRef.current?.click()}
+                                className="flex items-center space-x-1"
+                              >
+                                <Upload className="h-4 w-4" />
+                                <span>导入配置</span>
+                              </Button>
+                            </div>
                           </div>
                         </div>
                         

@@ -109,7 +109,7 @@ export function Dashboard({
       timeAbs: "15:30",
       type: "模型",
       description: "模型 \"客户流失预测\" 训练完成",
-      related: "客户流失预测-v3",
+      related: "客户流失预测-v3.0",
       status: "成功",
       statusMsg: "训练完成，准确率92.1%"
     },
@@ -218,7 +218,7 @@ export function Dashboard({
 
   // 智能助手建议列表（去除说明性句子，避免与标题重复）
   const assistantTips = [
-    "将客户流失预测V3从开发环境升级到实验室环境以试验部署",
+    "将客户流失预测 v3.0 从开发环境升级到实验室环境以试验部署",
     "建议\"设备故障预警\"模型进行因果解释以辅助运维人员一步决策",
     "将GPU使用率调整至最优配比，建议选择轻量级蒸馏优化",
   ];

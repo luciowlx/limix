@@ -111,7 +111,7 @@ export function DataManagement({
   const [isSubscriptionListOpen, setIsSubscriptionListOpen] = useState(false);
   const [isDataPreprocessingOpen, setIsDataPreprocessingOpen] = useState(false);
   const [selectedDatasetForPreprocessing, setSelectedDatasetForPreprocessing] = useState<Dataset | null>(null);
-  const [preprocessingMode, setPreprocessingMode] = useState<'traditional' | 'solo'>('traditional');
+  const [preprocessingMode, setPreprocessingMode] = useState<'traditional' | 'auto'>('traditional');
   const [isColumnSettingsOpen, setIsColumnSettingsOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);

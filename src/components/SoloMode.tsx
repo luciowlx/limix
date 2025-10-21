@@ -208,7 +208,7 @@ export function SoloMode({ projectName }: SoloModeProps) {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{projectName}</h1>
-            <p className="text-sm text-gray-600 mt-1">Solo模式 - 智能数据分析</p>
+            <p className="text-sm text-gray-600 mt-1">智能数据分析</p>
           </div>
           <div className="flex items-center space-x-4">
             <Button
