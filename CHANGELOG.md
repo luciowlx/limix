@@ -36,6 +36,12 @@
   - 涉及文件：
     - src/components/DataPreprocessing.tsx
 
+- [Tweak/UI] 数据详情页：移除“数据交互分析”页签与内容，保留“数据概览及变量”和“缺失分析”；简化导航与说明文案，界面更清晰
+  - 涉及文件：
+    - src/components/DataDetailFullPage.tsx
+  - 预览：
+    - 在 http://localhost:3000/ 打开“数据管理 -> 数据集详情分析”，确认不再显示“数据交互分析”页签，页面无报错。
+
 ### 2025-10-16
 - [Feature/UI] 数据预处理：在“选择数据集（Step 0）”新增结构化信息面板
   - 右侧信息面板在选择数据集后即时显示：

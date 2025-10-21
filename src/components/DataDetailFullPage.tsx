@@ -47,11 +47,12 @@ interface DataRow {
 export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedRows, setSelectedRows] = useState(20);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [xVariable, setXVariable] = useState("");
-  const [yVariable, setYVariable] = useState("");
-  const [correlationData, setCorrelationData] = useState<{x: number, y: number}[]>([]);
-  const [correlationCoeff, setCorrelationCoeff] = useState<number | null>(null);
+  // 移除交互分析相关的状态，界面保持简洁
+  // const [searchTerm, setSearchTerm] = useState("");
+  // const [xVariable, setXVariable] = useState("");
+  // const [yVariable, setYVariable] = useState("");
+  // const [correlationData, setCorrelationData] = useState<{x: number, y: number}[]>([]);
+  // const [correlationCoeff, setCorrelationCoeff] = useState<number | null>(null);
 
   // 模拟数据
   const mockData: DataRow[] = [
@@ -74,53 +75,7 @@ export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps
   const numericVariables = ["PassengerId", "Survived", "Pclass", "Age", "SibSp", "Parch", "Fare"];
   
   
-  // 计算相关性和生成散点图数据
-  const generateCorrelationData = (xVar: string, yVar: string) => {
-    if (!xVar || !yVar) return;
-    
-    // 过滤掉缺失值的数据
-    const validData = mockData.filter(row => {
-      const xVal = row[xVar as keyof DataRow];
-      const yVal = row[yVar as keyof DataRow];
-      return xVal !== null && yVal !== null && typeof xVal === 'number' && typeof yVal === 'number';
-    });
-    
-    // 生成散点图数据
-    const scatterData = validData.map(row => ({
-      x: row[xVar as keyof DataRow] as number,
-      y: row[yVar as keyof DataRow] as number
-    }));
-    
-    // 计算相关性系数
-    if (scatterData.length > 1) {
-      const n = scatterData.length;
-      const sumX = scatterData.reduce((sum, point) => sum + point.x, 0);
-      const sumY = scatterData.reduce((sum, point) => sum + point.y, 0);
-      const sumXY = scatterData.reduce((sum, point) => sum + point.x * point.y, 0);
-      const sumX2 = scatterData.reduce((sum, point) => sum + point.x * point.x, 0);
-      const sumY2 = scatterData.reduce((sum, point) => sum + point.y * point.y, 0);
-      
-      const correlation = (n * sumXY - sumX * sumY) / 
-        Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-      
-      setCorrelationCoeff(isNaN(correlation) ? null : correlation);
-    } else {
-      setCorrelationCoeff(null);
-    }
-    
-    setCorrelationData(scatterData);
-  };
-  
-  // 当变量选择改变时自动生成相关性分析
-  useEffect(() => {
-    if (xVariable && yVariable) {
-      generateCorrelationData(xVariable, yVariable);
-    } else {
-      setCorrelationData([]);
-      setCorrelationCoeff(null);
-    }
-  }, [xVariable, yVariable]);
-
+  // 数据交互分析功能已移除以简化界面
   const renderDataOverview = () => (
     <div className="space-y-6">
       {/* 数据概览标题（移除右侧操作按钮） */}
@@ -190,7 +145,7 @@ export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps
             </CardTitle>
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-600">选择要查看的记录数:</span>
-              <Select value={selectedRows.toString()} onValueChange={(value) => setSelectedRows(Number(value))}>
+              <Select value={selectedRows.toString()} onValueChange={(value: string) => setSelectedRows(Number(value))}>
                 <SelectTrigger className="w-20">
                   <SelectValue />
                 </SelectTrigger>
@@ -286,150 +241,6 @@ export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps
                 ))}
               </TableBody>
             </Table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-
-  const renderDataInteraction = () => (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">数据交互分析</h2>
-        <p className="text-gray-600 mt-1">探索变量之间的关系和相关性</p>
-      </div>
-
-      {/* 变量选择 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <label className="block text-sm font-medium mb-2">设定X轴变量</label>
-            <Select value={xVariable} onValueChange={setXVariable}>
-              <SelectTrigger>
-                <SelectValue placeholder="选择X轴变量" />
-              </SelectTrigger>
-              <SelectContent>
-                {numericVariables.map((variable) => (
-                  <SelectItem key={variable} value={variable}>{variable}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <label className="block text-sm font-medium mb-2">设定Y轴变量</label>
-            <Select value={yVariable} onValueChange={setYVariable}>
-              <SelectTrigger>
-                <SelectValue placeholder="选择Y轴变量" />
-              </SelectTrigger>
-              <SelectContent>
-                {numericVariables.map((variable) => (
-                  <SelectItem key={variable} value={variable}>{variable}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* 散点图区域 */}
-      <Card>
-        <CardContent className="p-6">
-          {/* 相关性系数显示 */}
-          {correlationCoeff !== null && (
-            <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700">相关性系数 (r):</span>
-                <span className={`text-lg font-bold ${
-                  Math.abs(correlationCoeff) > 0.7 ? 'text-green-600' :
-                  Math.abs(correlationCoeff) > 0.3 ? 'text-yellow-600' : 'text-red-600'
-                }`}>
-                  {correlationCoeff.toFixed(3)}
-                </span>
-              </div>
-              <div className="text-xs text-gray-500 mt-1">
-                {Math.abs(correlationCoeff) > 0.7 ? '强相关' :
-                 Math.abs(correlationCoeff) > 0.3 ? '中等相关' : '弱相关'}
-              </div>
-            </div>
-          )}
-          
-          <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center relative">
-            {/* 模拟散点图 */}
-            <div className="absolute inset-8 border-l-2 border-b-2 border-gray-300">
-              {/* Y轴标签 */}
-              <div className="absolute -left-16 top-1/2 text-sm text-gray-600 transform -rotate-90 -translate-y-1/2">
-                {yVariable || 'Y轴变量'}
-              </div>
-              {/* X轴标签 */}
-              <div className="absolute -bottom-8 left-1/2 text-sm text-gray-600 transform -translate-x-1/2">
-                {xVariable || 'X轴变量'}
-              </div>
-              
-              {/* Y轴刻度 */}
-              <div className="absolute -left-6 top-0 text-xs text-gray-500">800</div>
-              <div className="absolute -left-6 top-1/4 text-xs text-gray-500">600</div>
-              <div className="absolute -left-6 top-1/2 text-xs text-gray-500">400</div>
-              <div className="absolute -left-6 top-3/4 text-xs text-gray-500">200</div>
-              <div className="absolute -left-6 bottom-0 text-xs text-gray-500">0</div>
-              
-              {/* X轴刻度 */}
-              <div className="absolute -bottom-6 left-0 text-xs text-gray-500">0</div>
-              <div className="absolute -bottom-6 left-1/4 text-xs text-gray-500">20</div>
-              <div className="absolute -bottom-6 left-1/2 text-xs text-gray-500">40</div>
-              <div className="absolute -bottom-6 left-3/4 text-xs text-gray-500">60</div>
-              <div className="absolute -bottom-6 right-0 text-xs text-gray-500">80</div>
-              
-              {/* 网格线 */}
-              <div className="absolute inset-0">
-                {/* 水平网格线 */}
-                {[0, 25, 50, 75, 100].map(y => (
-                  <div
-                    key={`h-${y}`}
-                    className="absolute w-full border-t border-gray-200"
-                    style={{ bottom: `${y}%` }}
-                  />
-                ))}
-                {/* 垂直网格线 */}
-                {[0, 25, 50, 75, 100].map(x => (
-                  <div
-                    key={`v-${x}`}
-                    className="absolute h-full border-l border-gray-200"
-                    style={{ left: `${x}%` }}
-                  />
-                ))}
-              </div>
-              
-              {/* 散点 */}
-              {correlationData.length > 0 ? (
-                correlationData.map((point, index) => {
-                  const maxX = Math.max(...correlationData.map(d => d.x));
-                  const maxY = Math.max(...correlationData.map(d => d.y));
-                  return (
-                    <div
-                      key={index}
-                      className="absolute w-2 h-2 bg-blue-500 rounded-full opacity-70 hover:opacity-100 hover:scale-125 transition-all duration-200"
-                      style={{
-                        left: `${Math.min((point.x / maxX) * 85, 85)}%`,
-                        bottom: `${Math.min((point.y / maxY) * 85, 85)}%`,
-                      }}
-                    />
-                  );
-                })
-              ) : (
-                Array.from({ length: 50 }, (_, i) => (
-                  <div
-                    key={i}
-                    className="absolute w-2 h-2 bg-blue-500 rounded-full opacity-70 hover:opacity-100 transition-all duration-200"
-                    style={{
-                      left: `${Math.random() * 85}%`,
-                      bottom: `${Math.random() * 85}%`,
-                    }}
-                  />
-                ))
-              )}
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -576,7 +387,7 @@ export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps
         </div>
       </div>
 
-      {/* 标签页导航 */}
+      {/* 标签页导航（已去除“数据交互分析”以简化界面） */}
       <div className="bg-white border-b border-gray-200 px-6">
         <div className="flex space-x-8">
           <button
@@ -588,16 +399,6 @@ export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps
             onClick={() => setActiveTab("overview")}
           >
             数据概览及变量
-          </button>
-          <button
-            className={`py-4 px-2 border-b-2 font-medium text-sm ${
-              activeTab === "interaction"
-                ? "border-green-500 text-green-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-            onClick={() => setActiveTab("interaction")}
-          >
-            数据交互分析
           </button>
           <button
             className={`py-4 px-2 border-b-2 font-medium text-sm ${
@@ -615,7 +416,6 @@ export function DataDetailFullPage({ dataset, onClose }: DataDetailFullPageProps
       {/* 主要内容区域 */}
       <div className="p-6">
         {activeTab === "overview" && renderDataOverview()}
-        {activeTab === "interaction" && renderDataInteraction()}
         {activeTab === "missing" && renderMissingAnalysis()}
       </div>
     </div>
