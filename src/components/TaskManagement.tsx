@@ -185,6 +185,62 @@ interface DatasetVersion {
   sampleCount: number;
 }
 
+// 输出配置：分类任务平均方式
+type AverageMethod = 'micro' | 'macro' | 'samples' | 'weighted' | 'binary' | 'none';
+
+// 输出配置接口
+interface OutputConfig {
+  forecasting: {
+    metrics: {
+      mse: boolean;
+      rmse: boolean;
+      mae: boolean;
+      mape: boolean;
+      r2: boolean;
+      relDeviationPercents: number[]; // 正负相对偏差百分比，如 10, 20 表示 ±10%、±20%
+      absDeviationValues: number[];   // 正负绝对偏差，如 10, 20 表示 ±10、±20
+      customMetrics: string[];        // 自定义指标名称
+    };
+    visualizations: {
+      lineChart: boolean;             // 折线图
+      residualPlot: boolean;          // 残差图
+      predVsTrueScatter: boolean;     // 预测值 vs 真实值散点图
+      errorHistogram: boolean;        // 误差分布直方图
+    };
+  };
+  classification: {
+    metrics: {
+      precision: { enabled: boolean; average: AverageMethod };
+      recall: { enabled: boolean; average: AverageMethod };
+      f1: { enabled: boolean; average: AverageMethod };
+      rocAuc: { enabled: boolean; average: AverageMethod };
+    };
+    visualizations: {
+      rocCurve: boolean;              // ROC 曲线（支持 macro/micro）
+      prCurve: boolean;               // Precision-Recall 曲线
+      confusionMatrix: boolean;       // 混淆矩阵
+    };
+  };
+  regression: {
+    metrics: {
+      mse: boolean;
+      rmse: boolean;
+      mae: boolean;
+      mape: boolean;
+      r2: boolean;
+      relDeviationPercents: number[];
+      absDeviationValues: number[];
+      customMetrics: string[];
+    };
+    visualizations: {
+      lineChart: boolean;
+      residualPlot: boolean;
+      predVsTrueScatter: boolean;
+      errorHistogram: boolean;
+    };
+  };
+}
+
 interface TaskManagementProps {
   isCreateTaskDialogOpen?: boolean;
   onCreateTaskDialogChange?: (open: boolean) => void;
@@ -236,6 +292,8 @@ interface FormData {
   };
   // JSON格式手动配置
   manualConfig: string;
+  // 新增：输出配置（按任务类型）
+  outputConfig: OutputConfig;
   // 运行资源类型
   resourceType: 'cpu' | 'gpu' | 'auto';
   resourceConfig: {
@@ -340,6 +398,58 @@ interface FormData {
       shuffle: false
     },
     manualConfig: '',
+    // 新增：输出配置默认值（默认全选）
+    outputConfig: {
+      forecasting: {
+        metrics: {
+          mse: true,
+          rmse: true,
+          mae: true,
+          mape: true,
+          r2: true,
+          relDeviationPercents: [10, 20],
+          absDeviationValues: [10, 20],
+          customMetrics: []
+        },
+        visualizations: {
+          lineChart: true,
+          residualPlot: true,
+          predVsTrueScatter: true,
+          errorHistogram: true
+        }
+      },
+      classification: {
+        metrics: {
+          precision: { enabled: true, average: 'binary' },
+          recall: { enabled: true, average: 'binary' },
+          f1: { enabled: true, average: 'macro' },
+          rocAuc: { enabled: true, average: 'macro' }
+        },
+        visualizations: {
+          rocCurve: true,
+          prCurve: true,
+          confusionMatrix: true
+        }
+      },
+      regression: {
+        metrics: {
+          mse: true,
+          rmse: true,
+          mae: true,
+          mape: true,
+          r2: true,
+          relDeviationPercents: [10, 20],
+          absDeviationValues: [10, 20],
+          customMetrics: []
+        },
+        visualizations: {
+          lineChart: true,
+          residualPlot: true,
+          predVsTrueScatter: true,
+          errorHistogram: true
+        }
+      }
+    },
     resourceType: 'auto',
     resourceConfig: {
       cores: 4,

@@ -56,7 +56,8 @@ interface DataManagementProps {
   onNavigateToPreprocessing?: () => void;
   isUploadDialogOpen?: boolean;
   onUploadDialogClose?: () => void;
-  onOpenDataDetailFullPage?: (dataset: any) => void;
+  // 扩展：支持传入初始Tab，用于直接跳转至指定详情页标签
+  onOpenDataDetailFullPage?: (dataset: any, initialTab?: 'overview' | 'versions' | 'missing') => void;
 }
 
 interface ColumnSettings {
@@ -114,8 +115,7 @@ export function DataManagement({
   const [preprocessingMode, setPreprocessingMode] = useState<'traditional' | 'auto'>('traditional');
   const [isColumnSettingsOpen, setIsColumnSettingsOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
-  const [selectedDatasetForHistory, setSelectedDatasetForHistory] = useState<Dataset | null>(null);
+
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingDataset, setEditingDataset] = useState<Dataset | null>(null);
   const [isCopyDialogOpen, setIsCopyDialogOpen] = useState(false);
@@ -558,9 +558,9 @@ export function DataManagement({
 
   const handleViewVersionHistory = (id: number) => {
     const dataset = datasets.find(d => d.id === id);
-    if (dataset) {
-      setSelectedDatasetForHistory(dataset);
-      setIsVersionHistoryOpen(true);
+    if (dataset && onOpenDataDetailFullPage) {
+      // 改为打开全屏数据详情，并指定初始Tab为“版本历史”
+      onOpenDataDetailFullPage(dataset, 'versions');
     }
   };
 
@@ -1361,17 +1361,6 @@ export function DataManagement({
         </div>
       )}
 
-      {/* 版本历史页面 */}
-      {isVersionHistoryOpen && selectedDatasetForHistory && (
-        <VersionHistory
-          datasetId={selectedDatasetForHistory.id.toString()}
-          datasetName={selectedDatasetForHistory.title}
-          onBack={() => {
-            setIsVersionHistoryOpen(false);
-            setSelectedDatasetForHistory(null);
-          }}
-        />
-      )}
 
       {/* 数据上传对话框 */}
       <DataUpload
@@ -1473,7 +1462,7 @@ export function DataManagement({
                   <Label htmlFor="edit-source">数据源</Label>
                   <Select
                     value={editingDataset.source}
-                    onValueChange={(value) => setEditingDataset({
+                    onValueChange={(value: string) => setEditingDataset({
                       ...editingDataset,
                       source: value
                     })}
@@ -1559,7 +1548,7 @@ export function DataManagement({
                   <Label htmlFor="edit-format">数据格式</Label>
                   <Select
                     value={editingDataset.format}
-                    onValueChange={(value) => setEditingDataset({
+                    onValueChange={(value: string) => setEditingDataset({
                       ...editingDataset,
                       format: value
                     })}

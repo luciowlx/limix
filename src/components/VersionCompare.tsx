@@ -1,8 +1,19 @@
 import React from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Badge } from './ui/badge';
-import { ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, ArrowRight } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { Input } from './ui/input';
+
+interface FieldInfo {
+  name: string;
+  type: string; // 简化类型约束以避免字面量类型推断问题
+  nullable?: boolean;
+  missingRate?: number; // 百分比 0-100
+  uniqueRate?: number;  // 百分比 0-100
+  description?: string;
+}
 
 interface Version {
   id: string;
@@ -18,6 +29,8 @@ interface Version {
   missingRate: number;
   anomalyRate: number;
   rules?: string[];
+  tags?: string[]; // 新增：数据标签（可选）
+  fields?: FieldInfo[]; // 新增：字段列表（可选）
 }
 
 interface VersionCompareProps {
@@ -26,6 +39,40 @@ interface VersionCompareProps {
   datasetName: string;
   onBack: () => void;
 }
+
+// 基于版本号的字段 mock（若上游未提供 fields，则使用该函数生成）
+const getMockFields = (versionNumber: string): FieldInfo[] => {
+  const base: FieldInfo[] = [
+    { name: "PassengerId", type: "number", nullable: false, missingRate: 0, uniqueRate: 100, description: "乘客唯一 ID" },
+    { name: "Survived", type: "number", nullable: false, missingRate: 0, uniqueRate: 2, description: "是否生还" },
+    { name: "Pclass", type: "number", nullable: false, missingRate: 0, uniqueRate: 10, description: "舱位等级" },
+    { name: "Name", type: "string", nullable: false, missingRate: 0, uniqueRate: 95, description: "乘客姓名" },
+    { name: "Sex", type: "category", nullable: false, missingRate: 0, uniqueRate: 2, description: "性别" },
+    { name: "Age", type: "number", nullable: true, missingRate: 20, uniqueRate: 40, description: "年龄" },
+    { name: "SibSp", type: "number", nullable: false, missingRate: 0, uniqueRate: 30, description: "兄弟姐妹/配偶数量" },
+    { name: "Parch", type: "number", nullable: false, missingRate: 0, uniqueRate: 25, description: "父母/子女数量" },
+    { name: "Ticket", type: "string", nullable: false, missingRate: 5, uniqueRate: 70, description: "船票编号" },
+    { name: "Fare", type: "number", nullable: false, missingRate: 0, uniqueRate: 60, description: "票价" },
+    { name: "Cabin", type: "string", nullable: true, missingRate: 70, uniqueRate: 50, description: "舱位号" },
+    { name: "Embarked", type: "category", nullable: false, missingRate: 2, uniqueRate: 10, description: "登船港口" },
+    { name: "Boat", type: "string", nullable: true, missingRate: 80, uniqueRate: 10, description: "救生船编号" },
+    { name: "HomePort", type: "category", nullable: true, missingRate: 5, uniqueRate: 20, description: "原居港" },
+  ];
+  if (versionNumber === "v1.1") {
+    return [
+      ...base.map(f => f.name === "Age" ? { ...f, missingRate: 12 } : f), // 缺失率优化
+      { name: "isSenior", type: "boolean", nullable: false, missingRate: 0, uniqueRate: 50, description: "是否老年人(>=65)" },
+    ].filter(f => f.name !== "Boat"); // 该版本移除了 Boat 字段
+  }
+  if (versionNumber === "v1.2") {
+    return [
+      ...base.map(f => f.name === "Age" ? { ...f, missingRate: 8 } : f), // 进一步优化
+      { name: "isSenior", type: "boolean", nullable: false, missingRate: 0, uniqueRate: 50, description: "是否老年人(>=65)" },
+      { name: "CabinType", type: "category", nullable: true, missingRate: 75, uniqueRate: 30, description: "舱位类型" },
+    ].filter(f => f.name !== "Boat");
+  }
+  return base; // 其它版本使用基础字段
+};
 
 const VersionCompare: React.FC<VersionCompareProps> = ({ version1, version2, datasetName, onBack }) => {
   const getStatusBadge = (status: string) => {
@@ -76,6 +123,42 @@ const VersionCompare: React.FC<VersionCompareProps> = ({ version1, version2, dat
     return `${sign}${change.toFixed(1)}%`;
   };
 
+  // 字段列表获取（优先使用上游传入，其次使用本地 mock）
+  const fields1: FieldInfo[] = React.useMemo(() => version1.fields ?? getMockFields(version1.versionNumber), [version1]);
+  const fields2: FieldInfo[] = React.useMemo(() => version2.fields ?? getMockFields(version2.versionNumber), [version2]);
+
+  const map1 = React.useMemo(() => new Map(fields1.map(f => [f.name, f])), [fields1]);
+  const map2 = React.useMemo(() => new Map(fields2.map(f => [f.name, f])), [fields2]);
+
+  const allNames = React.useMemo(() => Array.from(new Set([...fields1.map(f => f.name), ...fields2.map(f => f.name)])), [fields1, fields2]);
+  const addedNames = React.useMemo(() => allNames.filter(n => !map1.has(n) && map2.has(n)), [allNames, map1, map2]);
+  const removedNames = React.useMemo(() => allNames.filter(n => map1.has(n) && !map2.has(n)), [allNames, map1, map2]);
+  const commonNames = React.useMemo(() => allNames.filter(n => map1.has(n) && map2.has(n)), [allNames, map1, map2]);
+
+  const changedNames = React.useMemo(() => commonNames.filter(n => {
+    const f1 = map1.get(n)!; const f2 = map2.get(n)!;
+    const safe = (x?: number) => Math.round(((x ?? 0)) * 1000) / 1000;
+    return f1.type !== f2.type || (f1.nullable ?? false) !== (f2.nullable ?? false) || (safe(f1.missingRate) !== safe(f2.missingRate)) || (safe(f1.uniqueRate) !== safe(f2.uniqueRate));
+  }), [commonNames, map1, map2]);
+
+  const [onlyChanged, setOnlyChanged] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+
+  const rows = React.useMemo(() => {
+    const base = (onlyChanged ? changedNames : commonNames)
+      .filter(n => n.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b));
+    return base.map(n => ({ name: n, f1: map1.get(n)!, f2: map2.get(n)! }));
+  }, [changedNames, commonNames, search, map1, map2, onlyChanged]);
+
+  const formatPct = (v?: number) => `${(v ?? 0).toFixed(1)}%`;
+
+  // 标签对比辅助：读取两侧版本的标签并设置颜色规则（共同标签灰色、左侧独有红色、右侧独有绿色）
+  const tags1 = React.useMemo(() => version1.tags ?? [], [version1]);
+  const tags2 = React.useMemo(() => version2.tags ?? [], [version2]);
+  const getLeftTagClass = (tag: string) => (tags2.includes(tag) ? "border-gray-300 text-gray-600" : "border-red-300 text-red-600");
+  const getRightTagClass = (tag: string) => (tags1.includes(tag) ? "border-gray-300 text-gray-600" : "border-green-300 text-green-600");
+
   return (
     <div className="space-y-6">
       {/* 页面头部 */}
@@ -123,6 +206,18 @@ const VersionCompare: React.FC<VersionCompareProps> = ({ version1, version2, dat
                 <span className="text-right">{version1.description}</span>
               </div>
             )}
+            <div className="flex justify-between items-start">
+              <span className="text-gray-600">数据标签:</span>
+              <div className="flex flex-wrap gap-2 justify-end">
+                {tags1.length === 0 ? (
+                  <span className="text-gray-400">暂无标签</span>
+                ) : (
+                  tags1.map((t, idx) => (
+                    <Badge key={idx} className={getLeftTagClass(t)} variant="outline">{t}</Badge>
+                  ))
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -155,6 +250,18 @@ const VersionCompare: React.FC<VersionCompareProps> = ({ version1, version2, dat
                 <span className="text-right">{version2.description}</span>
               </div>
             )}
+            <div className="flex justify-between items-start">
+              <span className="text-gray-600">数据标签:</span>
+              <div className="flex flex-wrap gap-2 justify-end">
+                {tags2.length === 0 ? (
+                  <span className="text-gray-400">暂无标签</span>
+                ) : (
+                  tags2.map((t, idx) => (
+                    <Badge key={idx} className={getRightTagClass(t)} variant="outline">{t}</Badge>
+                  ))
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -277,6 +384,112 @@ const VersionCompare: React.FC<VersionCompareProps> = ({ version1, version2, dat
         </CardContent>
       </Card>
 
+      {/* 字段详细对比 */}
+      <Card>
+        <CardHeader className="space-y-2">
+          <CardTitle>字段详细对比</CardTitle>
+          <CardDescription>
+            展示两版本在字段维度的具体差异，包括类型、缺失率、唯一性与可空属性。支持搜索与仅显示差异字段。
+          </CardDescription>
+          <div className="flex items-center gap-2">
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="按字段名称搜索..." className="max-w-xs" />
+            <Button variant={onlyChanged ? "default" : "outline"} size="sm" onClick={() => setOnlyChanged(v => !v)}>
+              {onlyChanged ? "显示全部字段" : "仅显示差异字段"}
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <Badge variant="secondary">新增字段：{addedNames.length}</Badge>
+            <Badge variant="secondary">删除字段：{removedNames.length}</Badge>
+            <Badge variant="secondary">发生变更：{changedNames.length}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="whitespace-nowrap">字段名称</TableHead>
+                  <TableHead className="whitespace-nowrap">{version1.versionNumber} 类型</TableHead>
+                  <TableHead className="whitespace-nowrap">{version2.versionNumber} 类型</TableHead>
+                  <TableHead className="whitespace-nowrap">可空变化</TableHead>
+                  <TableHead className="whitespace-nowrap">缺失率变化</TableHead>
+                  <TableHead className="whitespace-nowrap">唯一性变化</TableHead>
+                  <TableHead className="whitespace-nowrap">备注</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">无匹配字段</TableCell>
+                  </TableRow>
+                )}
+                {rows.map(({ name, f1, f2 }) => {
+                  const typeChanged = f1.type !== f2.type;
+                  const nullableChanged = (f1.nullable ?? false) !== (f2.nullable ?? false);
+                  const missChange = calculateChange(f1.missingRate ?? 0, f2.missingRate ?? 0);
+                  const uniqChange = calculateChange(f1.uniqueRate ?? 0, f2.uniqueRate ?? 0);
+                  return (
+                    <TableRow key={name}>
+                      <TableCell className="font-medium">{name}</TableCell>
+                      <TableCell className={typeChanged ? "text-red-600" : ""}>{f1.type}</TableCell>
+                      <TableCell className={typeChanged ? "text-red-600" : ""}>{f2.type}</TableCell>
+                      <TableCell className={nullableChanged ? "text-red-600" : ""}>{(f1.nullable ? "可空" : "不可空") + " -> " + (f2.nullable ? "可空" : "不可空")}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span>{formatPct(f1.missingRate)}</span>
+                          <ArrowRight className="w-4 h-4" />
+                          <span className={getChangeColor(f1.missingRate ?? 0, f2.missingRate ?? 0, false)}>{formatPct(f2.missingRate)}</span>
+                          <Badge variant="outline" className={getChangeColor(f1.missingRate ?? 0, f2.missingRate ?? 0, false)}>{missChange.toFixed(1)}%</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span>{formatPct(f1.uniqueRate)}</span>
+                          <ArrowRight className="w-4 h-4" />
+                          <span className={getChangeColor(f1.uniqueRate ?? 0, f2.uniqueRate ?? 0, true)}>{formatPct(f2.uniqueRate)}</span>
+                          <Badge variant="outline" className={getChangeColor(f1.uniqueRate ?? 0, f2.uniqueRate ?? 0, true)}>{uniqChange.toFixed(1)}%</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{f2.description ?? f1.description ?? ""}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* 新增/删除字段清单 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className="rounded-md border p-3">
+              <div className="font-medium mb-2">新增字段（仅 {version2.versionNumber}）</div>
+              {addedNames.length === 0 ? (
+                <div className="text-sm text-muted-foreground">无新增字段</div>
+              ) : (
+                <ul className="text-sm list-disc pl-5">
+                  {addedNames.map(n => {
+                    const f = map2.get(n)!;
+                    return <li key={n}>{n}（类型：{f.type}，缺失率：{formatPct(f.missingRate)}，唯一性：{formatPct(f.uniqueRate)}）</li>;
+                  })}
+                </ul>
+              )}
+            </div>
+            <div className="rounded-md border p-3">
+              <div className="font-medium mb-2">删除字段（仅 {version1.versionNumber}）</div>
+              {removedNames.length === 0 ? (
+                <div className="text-sm text-muted-foreground">无删除字段</div>
+              ) : (
+                <ul className="text-sm list-disc pl-5">
+                  {removedNames.map(n => {
+                    const f = map1.get(n)!;
+                    return <li key={n}>{n}（类型：{f.type}，缺失率：{formatPct(f.missingRate)}，唯一性：{formatPct(f.uniqueRate)}）</li>;
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 处理规则对比 */}
       {(version1.rules || version2.rules) && (
         <Card>
@@ -326,56 +539,6 @@ const VersionCompare: React.FC<VersionCompareProps> = ({ version1, version2, dat
         </Card>
       )}
 
-      {/* 对比总结 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>对比总结</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="p-4 bg-blue-50 rounded-lg">
-              <h4 className="font-semibold text-blue-800 mb-2">主要改进</h4>
-              <ul className="space-y-1 text-sm text-blue-700">
-                {version2.fieldCount > version1.fieldCount && (
-                  <li>• 字段数增加了 {version2.fieldCount - version1.fieldCount} 个</li>
-                )}
-                {version2.sampleCount > version1.sampleCount && (
-                  <li>• 样本数增加了 {(version2.sampleCount - version1.sampleCount).toLocaleString()} 个</li>
-                )}
-                {version2.missingRate < version1.missingRate && (
-                  <li>• 缺失比例降低了 {(version1.missingRate - version2.missingRate).toFixed(1)}%</li>
-                )}
-                {version2.anomalyRate < version1.anomalyRate && (
-                  <li>• 异常比例降低了 {(version1.anomalyRate - version2.anomalyRate).toFixed(1)}%</li>
-                )}
-              </ul>
-            </div>
-            
-            {(version2.fieldCount < version1.fieldCount || 
-              version2.sampleCount < version1.sampleCount || 
-              version2.missingRate > version1.missingRate || 
-              version2.anomalyRate > version1.anomalyRate) && (
-              <div className="p-4 bg-yellow-50 rounded-lg">
-                <h4 className="font-semibold text-yellow-800 mb-2">需要关注</h4>
-                <ul className="space-y-1 text-sm text-yellow-700">
-                  {version2.fieldCount < version1.fieldCount && (
-                    <li>• 字段数减少了 {version1.fieldCount - version2.fieldCount} 个</li>
-                  )}
-                  {version2.sampleCount < version1.sampleCount && (
-                    <li>• 样本数减少了 {(version1.sampleCount - version2.sampleCount).toLocaleString()} 个</li>
-                  )}
-                  {version2.missingRate > version1.missingRate && (
-                    <li>• 缺失比例增加了 {(version2.missingRate - version1.missingRate).toFixed(1)}%</li>
-                  )}
-                  {version2.anomalyRate > version1.anomalyRate && (
-                    <li>• 异常比例增加了 {(version2.anomalyRate - version1.anomalyRate).toFixed(1)}%</li>
-                  )}
-                </ul>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 };

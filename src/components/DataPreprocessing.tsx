@@ -11,6 +11,8 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Checkbox } from "./ui/checkbox";
 import { Progress } from "./ui/progress";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "./ui/hover-card";
+import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import { 
   Settings,
   Database,
@@ -43,6 +45,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { SoloDataCleaning } from "./SoloDataCleaning";
+import { datasetPreviewRows } from "../mock/datasetPreview";
 
 interface DataPreprocessingProps {
   isOpen: boolean;
@@ -118,6 +121,10 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   // Step 1（字段选择）：多数据源拼接支持
   const [primaryDatasetId, setPrimaryDatasetId] = useState<string | null>(null);
   const [datasetFieldsMap, setDatasetFieldsMap] = useState<Record<string, FieldInfo[]>>({});
+  // 缓存失效触发器（用于强制刷新聚合计算）
+  const [cacheBuster, setCacheBuster] = useState(0);
+  // 记录上一次的去重规则签名，用于比对变化以清理缓存
+  const prevDedupSignatureRef = useRef<string | null>(null);
   
   interface AggregatedField {
     name: string;
@@ -452,7 +459,13 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       { name: 'shift', type: 'string' },
       { name: 'line_no', type: 'string' },
       { name: 'product_id', type: 'string' },
-      { name: 'defect_rate', type: 'number' }
+      { name: 'batch_no', type: 'string' },
+      { name: 'process', type: 'string' },
+      { name: 'station', type: 'string' },
+      { name: 'remarks', type: 'string' },
+      { name: 'tags', type: 'array' },
+      { name: 'meta', type: 'object' },
+      { name: 'location', type: 'string' }
     ],
     '2': [
       { name: 'order_id', type: 'string' },
@@ -507,8 +520,31 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   const previewSchema = useMemo(() => (activeDatasetId ? (datasetFieldSchemas[activeDatasetId] || []) : []), [activeDatasetId]);
   const rawPreviewRows = useMemo(() => {
     if (!activeDatasetId) return [];
-    return generateSampleRows(previewSchema, 100);
-  }, [activeDatasetId, previewSchema]);
+    // 优先使用预置的 mock 行数据；若不存在则按 schema 生成
+    const preset = datasetPreviewRows?.[activeDatasetId as string];
+    const rows = Array.isArray(preset) && preset.length > 0 ? preset.slice(0, 100) : generateSampleRows(previewSchema, 100);
+    const schemaNames = previewSchema.map(s => s.name);
+    const dedupRules = cleaningRules.filter(r => r.type === 'deduplicate' && r.enabled);
+    const likelyKeys = ['id','order_id','device_id','sample_id','log_id','product_id','operator_id'];
+    const dedupKeys = (() => {
+      if (dedupRules.length > 0) {
+        const anyAll = dedupRules.some(r => (r.config?.useAllFields ?? true));
+        if (anyAll) return schemaNames;
+        const keys = Array.from(new Set(dedupRules.flatMap(r => Array.isArray(r.config?.keyFields) ? r.config.keyFields : [])));
+        return keys.filter(k => schemaNames.includes(k));
+      }
+      return schemaNames.filter(n => likelyKeys.includes(n));
+    })();
+    const typeByName: Record<string, FieldInfo['type']> = {};
+    previewSchema.forEach(col => { typeByName[col.name] = col.type; });
+    rows.forEach(row => {
+      dedupKeys.forEach(k => {
+        const t = typeByName[k];
+        row[k] = t === 'number' ? 1000 : '1000';
+      });
+    });
+    return rows;
+  }, [activeDatasetId, previewSchema, cleaningRules]);
   const totalPreviewPages = useMemo(() => Math.max(1, Math.ceil(rawPreviewRows.length / rowsPerPage)), [rawPreviewRows.length, rowsPerPage]);
   const pagedPreviewRows = useMemo(() => {
     const start = (previewPage - 1) * rowsPerPage;
@@ -541,15 +577,16 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   useEffect(() => {
     if (isOpen) {
       setCurrentStep(0);
-      setSelectedDatasetIds(datasetId ? [datasetId] : []);
-      setActiveDatasetId(datasetId);
+      const defaultId = datasetId || datasetOptions[0]?.id;
+      setSelectedDatasetIds(defaultId ? [defaultId] : []);
+      setActiveDatasetId(defaultId);
       setIsLoading(false);
-      // 若存在入口数据集，默认选择其默认版本并设为活动版本
-      if (datasetId) {
-        const defVerId = getDefaultVersionId(datasetId);
+      // 默认选择其默认版本并设为活动版本
+      if (defaultId) {
+        const defVerId = getDefaultVersionId(defaultId);
         if (defVerId) {
-          setSelectedDatasetVersions(prev => ({ ...prev, [datasetId]: [defVerId] }));
-          setActiveVersionByDataset(prev => ({ ...prev, [datasetId]: defVerId }));
+          setSelectedDatasetVersions(prev => ({ ...prev, [defaultId]: [defVerId] }));
+          setActiveVersionByDataset(prev => ({ ...prev, [defaultId]: defVerId }));
         }
       }
     }
@@ -632,30 +669,45 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   const loadDatasetInfo = async (id: string, versionId?: string) => {
     setIsLoading(true);
     try {
-      // 模拟API调用
+      // 模拟 API 调用（真实环境下应请求后端获取字段统计与示例值）
       await new Promise(resolve => setTimeout(resolve, 1000));
-      const mockFields: FieldInfo[] = buildMockFields();
-      setFields(mockFields);
+
+      // 按数据集/版本联动生成字段信息（优先使用 datasetFieldSchemas）
+      const infos: FieldInfo[] = ensureFieldInfosForDatasetVersion(id, versionId);
+      setFields(infos);
+
       // 缓存当前数据集的字段信息，便于多数据源聚合
       const key = versionId ? `${id}:${versionId}` : id;
-      setDatasetFieldsMap(prev => ({ ...prev, [key]: mockFields }));
+      setDatasetFieldsMap(prev => ({ ...prev, [key]: infos }));
       
-      // 基于字段统计模拟生成 AI 推荐清洗策略（智能推荐清洗策略模块）
-      // 依据 date-1.md 的规范，推荐策略仅生成允许的规则类型
-      const recommended: RecommendedStrategy[] = [
+      // 基于当前字段动态生成一条示例性的 AI 推荐清洗策略（符合允许的规则类型）
+      const emailField = infos.find(f => f.name.toLowerCase().includes('email'));
+      const firstString = infos.find(f => f.type === 'string');
+      const targetField = (emailField || firstString || infos[0]);
+      const total = targetField?.totalCount || 10000;
+      const missingRate = targetField ? (targetField.nullCount / Math.max(1, total)) : 0.12;
+      const confidence = Math.max(0.6, Math.min(0.95, 0.5 + missingRate));
+      const impactLevel: '高' | '中' | '低' = missingRate > 0.2 ? '高' : (missingRate > 0.05 ? '中' : '低');
+
+      const recommended: RecommendedStrategy[] = targetField ? [
         {
-          id: 'rs-2',
+          id: `rs-fill-${key}`,
           key: 'fill_missing',
           title: '缺失值填充',
-          description: '使用智能算法填充 age 和 location 字段的缺失值',
-          confidence: 0.88,
-          impactLevel: '高',
-          affectedRows: 8934,
-          affectedFields: ['age', 'location'],
-          rule: { field: 'email', type: 'fill_null', config: { fillValue: 'unknown@example.com' }, description: '用默认值填充邮箱空值' },
+          description: `建议对 ${targetField.name} 字段进行缺失值填充`,
+          confidence,
+          impactLevel,
+          affectedRows: Math.round(total * missingRate),
+          affectedFields: [targetField.name],
+          rule: {
+            field: targetField.name,
+            type: 'fill_null',
+            config: { fillValue: emailField ? 'unknown@example.com' : 'N/A' },
+            description: '填充缺失值'
+          },
           selected: false
         }
-      ];
+      ] : [];
       setRecommendedStrategies(recommended);
 
       // 将已勾选的推荐策略同步到清洗规则区域
@@ -674,9 +726,9 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
       setCleaningRules(defaultRules);
       
-      // 生成JSON配置（与界面互操作：只输出必要字段）
+      // 生成 JSON 配置（与界面互操作：只输出必要字段）
       const jsonConfigTemplate = {
-        fields: mockFields.filter(f => f.selected).map(f => f.name),
+        fields: infos.filter(f => f.selected).map(f => f.name),
         rules: defaultRules.filter(r => r.enabled).map(r => ({
           field: r.field,
           type: r.type,
@@ -710,6 +762,27 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
     if (cached && cached.length > 0) return cached;
     const schema = datasetFieldSchemas[id] || buildMockFields().map(f => ({ name: f.name, type: f.type }));
     const rows = generateSampleRows(schema, 5);
+    // 模拟重复值注入：将判定为去重的字段全部设为 1000
+    const schemaNames: string[] = schema.map(s => s.name);
+    const dedupRules = cleaningRules.filter(r => r.type === 'deduplicate' && r.enabled);
+    const defaultLikelyKeys = ['id','order_id','device_id','sample_id','log_id','product_id','operator_id'];
+    const dedupKeys: string[] = (() => {
+      if (dedupRules.length > 0) {
+        const anyAll = dedupRules.some(r => (r.config?.useAllFields ?? true));
+        if (anyAll) return schemaNames;
+        const keys = Array.from(new Set(dedupRules.flatMap(r => Array.isArray(r.config?.keyFields) ? r.config.keyFields : [])));
+        return keys.filter(k => schemaNames.includes(k));
+      }
+      return schemaNames.filter(n => defaultLikelyKeys.includes(n));
+    })();
+    const typeByName: Record<string, FieldInfo['type']> = {};
+    schema.forEach(col => { typeByName[col.name] = col.type; });
+    rows.forEach(row => {
+      dedupKeys.forEach(k => {
+        const t = typeByName[k];
+        row[k] = t === 'number' ? 1000 : '1000';
+      });
+    });
 
     const hashCode = (s: string) => {
       let h = 0;
@@ -744,6 +817,44 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
     setDatasetFieldsMap(prev => ({ ...prev, [key]: infos }));
     return infos;
   };
+
+  // 当去重规则变化时，使字段信息缓存失效并重算示例值
+  useEffect(() => {
+    const dedupSig = JSON.stringify(
+      cleaningRules
+        .filter(r => r.type === 'deduplicate')
+        .map(r => ({
+          enabled: r.enabled,
+          field: r.field,
+          useAllFields: r.config?.useAllFields ?? true,
+          keyFields: Array.isArray(r.config?.keyFields) ? [...r.config.keyFields].sort() : []
+        }))
+    );
+    if (prevDedupSignatureRef.current === null) {
+      prevDedupSignatureRef.current = dedupSig;
+      return;
+    }
+    if (prevDedupSignatureRef.current !== dedupSig) {
+      setDatasetFieldsMap(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(k => {
+          const idPart = k.split(':')[0];
+          if (selectedDatasetIds.includes(idPart)) {
+            delete next[k];
+          }
+        });
+        return next;
+      });
+      const dsId = activeDatasetId || selectedDatasetIds[0];
+      if (dsId) {
+        const verId = activeVersionByDataset[dsId] || (selectedDatasetVersions[dsId]?.[0]) || getDefaultVersionId(dsId);
+        const infos = ensureFieldInfosForDatasetVersion(dsId, verId);
+        setFields(infos);
+      }
+      setCacheBuster(prev => prev + 1);
+      prevDedupSignatureRef.current = dedupSig;
+    }
+  }, [cleaningRules, selectedDatasetIds, selectedDatasetVersions, activeDatasetId, activeVersionByDataset]);
 
   // 多数据源：公共字段聚合 / 全部字段视图（缺失率、重复率、唯一性、示例值、类型冲突）
   useEffect(() => {
@@ -917,7 +1028,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       }
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStep, selectedDatasetIds, selectedDatasetVersions, primaryDatasetId, primaryVersionId, activeDatasetId, activeVersionByDataset, showCommonOnly]);
+  }, [currentStep, selectedDatasetIds, selectedDatasetVersions, primaryDatasetId, primaryVersionId, activeDatasetId, activeVersionByDataset, showCommonOnly, cacheBuster]);
 
   // Step 2：主/从表聚合视图（多源/多版本）- 计算公共字段或全部字段
   useEffect(() => {
@@ -1003,20 +1114,31 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
     setStep2AggregatedFields(aggList);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStep, selectedDatasetIds, selectedDatasetVersions, step2PrimaryDatasetId, step2PrimaryVersionId, step2SecondaryDatasetId, step2SecondaryVersionId, activeDatasetId, activeVersionByDataset, step2ShowCommonOnly, primaryDatasetId, primaryVersionId]);
+  }, [currentStep, selectedDatasetIds, selectedDatasetVersions, step2PrimaryDatasetId, step2PrimaryVersionId, step2SecondaryDatasetId, step2SecondaryVersionId, activeDatasetId, activeVersionByDataset, step2ShowCommonOnly, primaryDatasetId, primaryVersionId, cacheBuster]);
 
   // 从“选择数据集”进入下一步：字段选择
   const proceedToFieldSelection = () => {
     if (!activeDatasetId) {
-      toast.warning('请先选择至少一个数据集并切换到要预览的数据集');
-      return;
+      // 若未设置预览数据集，但只选择了一个数据集，则自动将其设为预览
+      if (selectedDatasetIds.length === 1) {
+        setActiveDatasetId(selectedDatasetIds[0]);
+      } else {
+        toast.warning('请先选择至少一个数据集并切换到要预览的数据集');
+        return;
+      }
     }
-    const vers = selectedDatasetVersions[activeDatasetId] || [];
-    const verId = activeVersionByDataset[activeDatasetId] || vers[0] || getDefaultVersionId(activeDatasetId);
+    const dsId = activeDatasetId || selectedDatasetIds[0];
+    const vers = selectedDatasetVersions[dsId] || [];
+    const verId = activeVersionByDataset[dsId] || vers[0] || getDefaultVersionId(dsId);
     if (!verId) {
       toast.warning('请在当前数据集下选择至少一个版本');
       return;
     }
+    // 同步下一步的基础数据源与版本，确保前后步骤数据关联
+    setPrimaryDatasetId(dsId);
+    setPrimaryVersionId(verId);
+    setStep2PrimaryDatasetId(dsId);
+    setStep2PrimaryVersionId(verId);
     setCurrentStep(1);
   };
 
@@ -1024,8 +1146,8 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   const toggleDatasetSelection = (id: string, checked: boolean) => {
     setSelectedDatasetIds(prev => {
       let next = checked ? Array.from(new Set([...prev, id])) : prev.filter(d => d !== id);
-      // 若首次选择或当前预览被取消，自动切换预览指向第一个已选数据集
-      if (checked && !activeDatasetId) {
+      // 勾选时直接切换预览到当前数据集；取消勾选且当前预览为该数据集时，回退到剩余列表的第一个
+      if (checked) {
         setActiveDatasetId(id);
       } else if (!checked && activeDatasetId === id) {
         setActiveDatasetId(next[0]);
@@ -1061,10 +1183,10 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       const arr = prev[datasetId] || [];
       const nextArr = checked ? Array.from(new Set([...arr, versionId])) : arr.filter(v => v !== versionId);
       const next = { ...prev, [datasetId]: nextArr };
-      // 维护活动版本：若尚未设置，或当前活动版本被取消，则切换
+      // 勾选时即将该版本设为当前预览版本；取消时若取消的是当前预览则回退到剩余的第一个
       setActiveVersionByDataset(prevActive => {
         const active = prevActive[datasetId];
-        if (checked && !active) return { ...prevActive, [datasetId]: versionId };
+        if (checked) return { ...prevActive, [datasetId]: versionId };
         if (!checked && active === versionId) return { ...prevActive, [datasetId]: nextArr[0] };
         return prevActive;
       });
@@ -2824,7 +2946,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
 
                                     {!((rule.config?.useAllFields ?? true)) && (
                                       <div>
-                                        <Label>判定重复的字段集（可多选）</Label>
+                                        <Label>判定重复的字段集（可多选，悬停字段名可预览重复值）</Label>
                                         <div className="flex flex-wrap gap-2">
                                           {optionNames.map(name => (
                                             <div key={name} className="flex items-center space-x-2">
@@ -2836,7 +2958,105 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                                   updateCleaningRule(rule.id, { config: { ...rule.config, keyFields: nextKeys } });
                                                 }}
                                               />
-                                              <span className="text-sm">{name}</span>
+                                              <HoverCard>
+                                                <HoverCardTrigger asChild>
+                                                  <span className="text-sm cursor-help hover:underline decoration-dotted">{name}</span>
+                                                </HoverCardTrigger>
+                                                <HoverCardContent align="start" className="w-[420px] p-3">
+                                                  {(() => {
+                                                    const isMulti = selectedSourcesForView.length > 1;
+                                                    const srcFields: any[] = isMulti ? step2AggregatedFields : fields;
+                                                    const f: any = srcFields.find((ff: any) => ff.name === name);
+                                                    const raw: any[] = Array.isArray(f?.sampleValues) ? f.sampleValues : [];
+                                                    const nonNull = raw.filter(v => v !== null && v !== undefined && v !== '');
+                                                    const counts: Record<string, number> = {};
+                                                    nonNull.forEach(v => {
+                                                      const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                                                      counts[s] = (counts[s] || 0) + 1;
+                                                    });
+                                                    const total = nonNull.length;
+                                                    const unique = Object.keys(counts).length;
+                                                    const sumDup = Object.values(counts).reduce((acc, c) => acc + (c > 1 ? c - 1 : 0), 0);
+                                                    const dupRatio = total > 0 ? sumDup / total : 0;
+                                                    const top = Object.entries(counts)
+                                                      .filter(([_, c]) => c > 1)
+                                                      .sort((a, b) => b[1] - a[1])
+                                                      .slice(0, 5)
+                                                      .map(([v, c]) => ({ value: v, count: c, pct: total > 0 ? c / total : 0 }));
+                                                    return (
+                                                      <div className="space-y-2">
+                                                        <div className="text-sm font-medium">列预览：{name}</div>
+                                                        <div className="text-xs text-gray-600">样本量：{total}；唯一值：{unique}；重复占比：{(dupRatio * 100).toFixed(1)}%</div>
+                                                        {top.length > 0 ? (
+                                                          <div className="space-y-1">
+                                                            {top.map((item, idx) => (
+                                                              <div key={idx} className="flex items-center gap-2">
+                                                                <Popover>
+                                                                  <PopoverTrigger asChild>
+                                                                    <span className="flex-1 truncate cursor-pointer hover:underline decoration-dotted" title={item.value}>{item.value}</span>
+                                                                  </PopoverTrigger>
+                                                                  <PopoverContent align="start" className="w-[820px] max-w-[90vw] p-3">
+                                                                    {(() => {
+                                                                      const allCols: string[] = Array.isArray(previewSchema) && previewSchema.length > 0
+                                                                        ? (previewSchema as any[]).map((s: any) => s.name)
+                                                                        : (Array.isArray(srcFields) ? (srcFields as any[]).map((f: any) => f.name) : []);
+                                                                      const displayCols: string[] = allCols; // 展示所有列，满足“一整行数据”的需求
+                                                                      const rows: any[] = Array.isArray(rawPreviewRows)
+                                                                        ? (rawPreviewRows as any[]).filter((r: any) => {
+                                                                            const v = r?.[name];
+                                                                            const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                                                                            return s === item.value;
+                                                                          }).slice(0, 5)
+                                                                        : [];
+                                                                      return (
+                                                                        <div className="space-y-2">
+                                                                          <div className="text-sm font-medium">行详情：{name} = {item.value}</div>
+                                                                          {rows.length > 0 ? (
+                                                                            <div className="border rounded overflow-auto max-h-[420px] max-w-full">
+                                                                              <Table>
+                                                                                <TableHeader>
+                                                                                  <TableRow>
+                                                                                    {displayCols.map((col: string) => (
+                                                                                      <TableHead key={col} className="text-xs whitespace-nowrap">{col}</TableHead>
+                                                                                    ))}
+                                                                                  </TableRow>
+                                                                                </TableHeader>
+                                                                                <TableBody>
+                                                                                  {rows.map((row: any, ridx: number) => (
+                                                                                    <TableRow key={ridx}>
+                                                                                      {displayCols.map((col: string) => (
+                                                                                        <TableCell key={col} className="text-xs whitespace-nowrap">{formatCellValue(row?.[col])}</TableCell>
+                                                                                      ))}
+                                                                                    </TableRow>
+                                                                                  ))}
+                                                                                </TableBody>
+                                                                              </Table>
+                                                                            </div>
+                                                                          ) : (
+                                                                            <div className="text-xs text-gray-600">当前数据集未提供符合该值的预览行。</div>
+                                                                          )}
+                                                                          <div className="text-[11px] text-gray-500">提示：行详情基于预览样本展示，最多显示5条；若列过多或内容较长，可在上方容器内滚动查看完整行。</div>
+                                                                        </div>
+                                                                      );
+                                                                    })()}
+                                                                  </PopoverContent>
+                                                                </Popover>
+                                                                <span className="text-xs text-gray-600 w-14 text-right">×{item.count}</span>
+                                                                <div className="h-1.5 w-24 bg-gray-200 rounded">
+                                                                  <div className="h-1.5 bg-primary rounded" style={{ width: `${Math.max(4, Math.round(item.pct * 100))}%` }} />
+                                                                </div>
+                                                              </div>
+                                                            ))}
+                                                          </div>
+                                                        ) : (
+                                                          <div className="text-xs text-gray-600">当前样本未发现重复值</div>
+                                                        )}
+                                                        <div className="text-[11px] text-gray-500">提示：以上统计基于示例值进行估算，仅用于配置参考。</div>
+                                                      </div>
+                                                    );
+                                                  })()}
+                                                </HoverCardContent>
+                                              </HoverCard>
                                             </div>
                                           ))}
                                         </div>

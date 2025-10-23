@@ -22,6 +22,28 @@
 
 ## 变更历史
 
+### 2025-10-23
+- [Feature/Config] 任务管理：新增 OutputConfig 类型定义并扩展 FormData，初始化默认输出配置（预测/分类/回归均勾选常用指标与可视化）。
+  - 涉及文件：
+    - src/components/TaskManagement.tsx（新增 AverageMethod/OutputConfig 类型；在 formData 中加入 outputConfig 默认值）
+  - 说明/验证：本次为类型与默认值扩展，暂不包含 UI 渲染；后续将补充“输出配置”页面区块并将其映射到任务提交 payload。
+
+
+### 2025-10-22
+- [Feature/UI] 重复值弹窗“行详情”改为展示整行数据的表格
+  - 变更点：PopoverContent 宽度 `w-[820px] max-w-[90vw]`；外层容器添加 `overflow-auto max-h-[420px] max-w-full`；表头/单元格添加 `whitespace-nowrap`；提示信息更新。
+  - 效果：完整展示整行数据，横向/纵向滚动均可，列不自动换行，适合查看长行。
+  - 涉及文件：
+    - `src/components/DataPreprocessing.tsx`
+  - 预览：进入“数据管理 -> 数据预处理 -> 去重规则”，点击“列预览/样本值”，弹窗显示整行表，滚动正常。
+
+- [Feature/Mock] 预览数据接入 mock 并默认显示
+  - 新增：`src/mock/datasetPreview.ts` 提供示例行（设备、ERP、日志、质检），涵盖字符串/数字/日期/数组(tags)/对象(meta)。
+  - 接入：`DataPreprocessing.tsx` 中 `rawPreviewRows` 优先使用 `datasetPreviewRows[activeDatasetId]`，否则按 `previewSchema` 生成；打开弹窗时自动选择第一个数据集；扩展 `datasetFieldSchemas`（为数据集 `id=1` 补充 `tags/meta/location/batch_no/process/station/remarks` 等列）。
+  - 影响：即使未接后端，也能直观看到示例数据；去重与预览逻辑基于该数据工作。
+  - 预览：运行 `npm run dev`，在 `http://localhost:3000/` 打开“数据预处理”，无需额外操作即可看到预览数据。
+
+
 ### 2025-10-21
 - [Feature/UI] 数据预处理：新增“数据转换（numeric_transform）”规则配置区，支持多字段选择与方法参数设置
   - 方法：Min-Max、Z-score、Robust、Max-Abs、小数缩放、单位向量；提供默认参数与输入校验；按样本归一化在单字段时给出非阻塞提示

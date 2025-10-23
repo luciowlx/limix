@@ -94,6 +94,8 @@ export default function App() {
 
   // 数据详情全页面状态
   const [selectedDatasetForFullPage, setSelectedDatasetForFullPage] = useState<any>(null);
+  // 新增：数据详情初始 Tab（overview/versions/missing）
+  const [dataDetailInitialTab, setDataDetailInitialTab] = useState<'overview' | 'versions' | 'missing' | null>(null);
 
   // 任务详情全页面状态
   const [selectedTaskForFullPage, setSelectedTaskForFullPage] = useState<any>(null);
@@ -441,11 +443,15 @@ export default function App() {
     setFullPageViewType(null);
     setSelectedDatasetForFullPage(null);
     setSelectedTaskForFullPage(null);
+    // 同步重置数据详情初始页签
+    setDataDetailInitialTab(null);
   };
 
   // 数据详情全页面处理函数
-  const handleOpenDataDetailFullPage = (dataset: any) => {
+  const handleOpenDataDetailFullPage = (dataset: any, initialTab?: 'overview' | 'versions' | 'missing') => {
     setSelectedDatasetForFullPage(dataset);
+    // 根据调用方传入的初始页签进行设置，默认跳转到概览
+    setDataDetailInitialTab(initialTab ?? 'overview');
     setFullPageViewType('data-detail');
   };
 
@@ -1535,6 +1541,7 @@ export default function App() {
         <DataDetailFullPage 
           dataset={selectedDatasetForFullPage}
           onClose={handleCloseFullPageView}
+          initialTab={dataDetailInitialTab ?? 'overview'}
         />
       )}
       {fullPageViewType === 'task-detail' && selectedTaskForFullPage && (
