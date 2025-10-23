@@ -260,7 +260,7 @@ export function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="department">部门</Label>
-                <Select value={formData.department} onValueChange={(value) => setFormData({ ...formData, department: value })}>
+                <Select value={formData.department} onValueChange={(value: string) => setFormData({ ...formData, department: value })}>
                   <SelectTrigger>
                     <SelectValue placeholder="选择部门" />
                   </SelectTrigger>
@@ -273,7 +273,7 @@ export function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="role">角色</Label>
-                <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                <Select value={formData.role} onValueChange={(value: string) => setFormData({ ...formData, role: value })}>
                   <SelectTrigger>
                     <SelectValue placeholder="选择角色" />
                   </SelectTrigger>
@@ -493,7 +493,7 @@ export function UserManagement() {
             </div>
             <div>
               <Label htmlFor="edit-department">部门</Label>
-              <Select value={formData.department} onValueChange={(value) => setFormData({ ...formData, department: value })}>
+              <Select value={formData.department} onValueChange={(value: string) => setFormData({ ...formData, department: value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择部门" />
                 </SelectTrigger>
@@ -506,7 +506,7 @@ export function UserManagement() {
             </div>
             <div>
               <Label htmlFor="edit-role">角色</Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+              <Select value={formData.role} onValueChange={(value: string) => setFormData({ ...formData, role: value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择角色" />
                 </SelectTrigger>

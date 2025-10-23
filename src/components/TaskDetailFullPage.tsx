@@ -1138,7 +1138,7 @@ output:
                 <CardDescription>支持 micro / macro / weighted 平均</CardDescription>
               </div>
               <div className="w-48">
-                <Select value={avgMethod} onValueChange={(v) => setAvgMethod(v as any)}>
+                <Select value={avgMethod} onValueChange={(v: 'micro' | 'macro' | 'weighted') => setAvgMethod(v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="选择平均方式" />
                   </SelectTrigger>
@@ -1278,7 +1278,7 @@ output:
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48">
-                  <Select value={clsCompareMetric} onValueChange={(v) => setClsCompareMetric(v as any)}>
+                  <Select value={clsCompareMetric} onValueChange={(v: 'accuracy' | 'f1_macro' | 'roc_auc_macro') => setClsCompareMetric(v)}>
                     <SelectTrigger>
                       <SelectValue placeholder="选择指标" />
                     </SelectTrigger>
@@ -1547,7 +1547,7 @@ output:
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48">
-                  <Select value={fctCompareMetric} onValueChange={(v) => setFctCompareMetric(v as any)}>
+                  <Select value={fctCompareMetric} onValueChange={(v: 'rmse' | 'mae' | 'mape' | 'r2') => setFctCompareMetric(v)}>
                     <SelectTrigger>
                       <SelectValue placeholder="选择指标" />
                     </SelectTrigger>
@@ -1687,7 +1687,7 @@ output:
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48">
-                  <Select value={regCompareMetric} onValueChange={(v) => setRegCompareMetric(v as any)}>
+                  <Select value={regCompareMetric} onValueChange={(v: 'mse' | 'rmse' | 'mae' | 'r2') => setRegCompareMetric(v)}>
                     <SelectTrigger>
                       <SelectValue placeholder="选择指标" />
                     </SelectTrigger>
@@ -2126,7 +2126,7 @@ output:
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-52">
-                        <Select value={String(datasetPreviewIndex)} onValueChange={(v) => setDatasetPreviewIndex(Number(v))}>
+                        <Select value={String(datasetPreviewIndex)} onValueChange={(v: string) => setDatasetPreviewIndex(Number(v))}>
                           <SelectTrigger>
                             <SelectValue placeholder="选择数据集" />
                           </SelectTrigger>
@@ -2140,7 +2140,7 @@ output:
                         </Select>
                       </div>
                       <div className="w-36">
-                        <Select value={String(previewRowCount)} onValueChange={(v) => setPreviewRowCount(Number(v))}>
+                        <Select value={String(previewRowCount)} onValueChange={(v: string) => setPreviewRowCount(Number(v))}>
                           <SelectTrigger>
                             <SelectValue placeholder="行数" />
                           </SelectTrigger>

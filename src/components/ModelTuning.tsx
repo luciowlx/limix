@@ -429,7 +429,7 @@ export function ModelTuning({ onBack }: ModelTuningProps) {
                   <Label htmlFor="batch-size">批量大小</Label>
                   <Select 
                     value={trainingConfig.batchSize.toString()} 
-                    onValueChange={(value) => setTrainingConfig({
+                    onValueChange={(value: string) => setTrainingConfig({
                       ...trainingConfig, 
                       batchSize: parseInt(value)
                     })}
@@ -491,7 +491,7 @@ export function ModelTuning({ onBack }: ModelTuningProps) {
                   <Label>优化器</Label>
                   <Select 
                     value={trainingConfig.optimizer} 
-                    onValueChange={(value) => setTrainingConfig({
+                    onValueChange={(value: string) => setTrainingConfig({
                       ...trainingConfig, 
                       optimizer: value
                     })}
@@ -512,7 +512,7 @@ export function ModelTuning({ onBack }: ModelTuningProps) {
                   <Label>损失函数</Label>
                   <Select 
                     value={trainingConfig.lossFunction} 
-                    onValueChange={(value) => setTrainingConfig({
+                    onValueChange={(value: string) => setTrainingConfig({
                       ...trainingConfig, 
                       lossFunction: value
                     })}
@@ -542,9 +542,9 @@ export function ModelTuning({ onBack }: ModelTuningProps) {
                 <Checkbox
                   id="early-stopping"
                   checked={trainingConfig.earlyStopping}
-                  onCheckedChange={(checked) => setTrainingConfig({
+                  onCheckedChange={(checked: boolean) => setTrainingConfig({
                     ...trainingConfig, 
-                    earlyStopping: checked as boolean
+                    earlyStopping: checked
                   })}
                 />
                 <Label htmlFor="early-stopping" className="text-sm">

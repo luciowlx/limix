@@ -28,6 +28,31 @@
     - src/components/TaskManagement.tsx（新增 AverageMethod/OutputConfig 类型；在 formData 中加入 outputConfig 默认值）
   - 说明/验证：本次为类型与默认值扩展，暂不包含 UI 渲染；后续将补充“输出配置”页面区块并将其映射到任务提交 payload。
 
+- [Feature/Import/Export] 任务管理：JSON 模板导出/导入支持输出配置（output）字段，并与 UI 预填联动
+  - 涉及文件：
+    - src/components/TaskManagement.tsx（buildJsonTemplate/handleExportJsonTemplate/handleImportJsonFile）
+  - 说明/验证：
+    - 导出模板包含 output（随 taskType 的分支）
+    - 导入 JSON 自动切换到 json 模式，并按输出配置预填 UI
+    - 预览地址：http://localhost:3002/
+
+- [Feature/Edit] 编辑模式预填：从 task.config.output 映射到 formData.outputConfig（按任务类型）
+  - 涉及文件：
+    - src/components/TaskManagement.tsx
+  - 说明：编辑任务时自动回显输出配置，避免手动重选
+
+- [Feature/Save] 保存逻辑统一：
+  - json 模式：解析 manualConfig 并合并当前 output 到 JSON（补齐 taskType/mode），再字符串化保存
+  - page 模式：在 base（forecasting/classification/regression）结构上加入 output 字段
+  - 涉及文件：
+    - src/components/TaskManagement.tsx
+  - 说明/验证：无论模式，后端收到的 config 均含 output 字段
+
+- [Tweak/Type] 类型增强：handleInputChange 使用泛型 <K extends keyof FormData>
+  - 涉及文件：
+    - src/components/TaskManagement.tsx
+  - 说明：减少隐式 any 警告，提升类型安全
+
 
 ### 2025-10-22
 - [Feature/UI] 重复值弹窗“行详情”改为展示整行数据的表格

@@ -649,7 +649,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
                           <div className="flex items-center space-x-2 mb-2">
                             <Checkbox
                               checked={selectedModelsForCompare.includes(model.id)}
-                              onCheckedChange={(checked) => {
+                              onCheckedChange={(checked: boolean) => {
                                 if (checked) {
                                   if (selectedModelsForCompare.length < 3) {
                                     setSelectedModelsForCompare([...selectedModelsForCompare, model.id]);
@@ -759,7 +759,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
               <div key={key} className="flex items-center space-x-2">
                 <Checkbox
                   checked={setting.visible}
-                  onCheckedChange={(checked) => {
+                  onCheckedChange={(checked: boolean) => {
                     setColumnSettings(prev => ({
                       ...prev,
                       [key]: { ...prev[key], visible: !!checked }

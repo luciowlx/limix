@@ -296,7 +296,7 @@ const VersionDetail: React.FC<VersionDetailProps> = ({ version, datasetName, onB
             <span>版本数据预览（预处理后）</span>
             <div className="flex items-center space-x-3">
               <span className="text-sm text-gray-600">选择预览行数:</span>
-              <Select value={String(previewRows)} onValueChange={(v) => setPreviewRows(Number(v))}>
+              <Select value={String(previewRows)} onValueChange={(v: string) => setPreviewRows(Number(v))}>
                 <SelectTrigger className="w-24">
                   <SelectValue />
                 </SelectTrigger>

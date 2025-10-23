@@ -496,7 +496,7 @@ export default function TaskTypeManagement({ isAdmin = true }: TaskTypeManagemen
           <div className="space-y-4">
             <div>
               <Label>选择历史版本</Label>
-              <Select value={selectedRollbackVersion ? String(selectedRollbackVersion) : undefined} onValueChange={(v) => setSelectedRollbackVersion(Number(v))}>
+              <Select value={selectedRollbackVersion ? String(selectedRollbackVersion) : undefined} onValueChange={(v: string) => setSelectedRollbackVersion(Number(v))}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择版本" />
                 </SelectTrigger>

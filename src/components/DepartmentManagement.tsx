@@ -542,7 +542,7 @@ export function DepartmentManagement() {
                 <TableHead className="w-12">
                   <Checkbox
                     checked={selectedUsers.length === filteredUsers.length && filteredUsers.length > 0}
-                    onCheckedChange={(checked) => {
+                    onCheckedChange={(checked: boolean) => {
                       if (checked) {
                         setSelectedUsers(filteredUsers.map(user => user.id));
                       } else {
@@ -565,7 +565,7 @@ export function DepartmentManagement() {
                   <TableCell>
                     <Checkbox
                       checked={selectedUsers.includes(user.id)}
-                      onCheckedChange={(checked) => {
+                      onCheckedChange={(checked: boolean) => {
                         if (checked) {
                           setSelectedUsers([...selectedUsers, user.id]);
                         } else {
@@ -644,7 +644,7 @@ export function DepartmentManagement() {
             </div>
             <div>
               <Label htmlFor="dept-parent">上级部门</Label>
-              <Select value={deptFormData.parentId} onValueChange={(value) => setDeptFormData({ ...deptFormData, parentId: value })}>
+              <Select value={deptFormData.parentId} onValueChange={(value: string) => setDeptFormData({ ...deptFormData, parentId: value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择上级部门（可选）" />
                 </SelectTrigger>
@@ -779,7 +779,7 @@ export function DepartmentManagement() {
             </div>
             <div>
               <Label htmlFor="user-department">所属部门</Label>
-              <Select value={userFormData.departmentId} onValueChange={(value) => setUserFormData({ ...userFormData, departmentId: value })}>
+              <Select value={userFormData.departmentId} onValueChange={(value: string) => setUserFormData({ ...userFormData, departmentId: value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择所属部门" />
                 </SelectTrigger>
@@ -848,7 +848,7 @@ export function DepartmentManagement() {
             </div>
             <div>
               <Label htmlFor="detail-user-department">所属部门</Label>
-              <Select value={userFormData.departmentId} onValueChange={(value) => setUserFormData({ ...userFormData, departmentId: value })}>
+              <Select value={userFormData.departmentId} onValueChange={(value: string) => setUserFormData({ ...userFormData, departmentId: value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择所属部门" />
                 </SelectTrigger>
@@ -897,7 +897,7 @@ export function DepartmentManagement() {
             </div>
             <div>
               <Label htmlFor="change-department">目标部门</Label>
-              <Select value={userFormData.departmentId} onValueChange={(value) => setUserFormData({ ...userFormData, departmentId: value })}>
+              <Select value={userFormData.departmentId} onValueChange={(value: string) => setUserFormData({ ...userFormData, departmentId: value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择目标部门" />
                 </SelectTrigger>

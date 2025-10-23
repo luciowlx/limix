@@ -33,6 +33,7 @@ import {
   Minimize2,
   X,
   Upload,
+  BarChart3,
 } from 'lucide-react';
 import { Pencil } from 'lucide-react';
 import { Button } from './ui/button';
@@ -87,6 +88,7 @@ import {
   TableRow,
 } from './ui/table';
 import TaskCompare from './TaskCompare';
+import type { TaskCompareItem } from './TaskCompare';
 
 // 模拟项目列表（后续可替换为真实项目数据）
 const mockProjects = [
@@ -484,6 +486,7 @@ interface FormData {
           mainVariableFiles: formData.forecastingConfig.mainVariableFiles || [],
           covariateFiles: formData.forecastingConfig.covariateFiles || [],
         },
+        output: { ...formData.outputConfig.forecasting },
         hyperparameters: baseHyper,
       };
     }
@@ -496,6 +499,7 @@ interface FormData {
           testRatio: formData.classificationConfig.testRatio,
           shuffle: formData.classificationConfig.shuffle,
         },
+        output: { ...formData.outputConfig.classification },
         hyperparameters: baseHyper,
       };
     }
@@ -508,6 +512,7 @@ interface FormData {
         testRatio: formData.regressionConfig.testRatio,
         shuffle: formData.regressionConfig.shuffle,
       },
+      output: { ...formData.outputConfig.regression },
       hyperparameters: baseHyper,
     };
   };
@@ -542,6 +547,79 @@ interface FormData {
       }
       const pretty = JSON.stringify(parsed, null, 2);
       handleInputChange('manualConfig', pretty);
+      handleInputChange('hyperparameterMode', 'json');
+      // 可选：根据导入文件的输出配置，预填 UI 的 outputConfig（按当前任务类型）
+      try {
+        const taskType = (parsed.taskType as TaskType) || formData.taskType;
+        const output = parsed.output;
+        if (output && typeof output === 'object' && !Array.isArray(output)) {
+          if (taskType === 'forecasting') {
+            handleInputChange('outputConfig', {
+              ...formData.outputConfig,
+              forecasting: {
+                metrics: {
+                  mse: Boolean(output.metrics?.mse),
+                  rmse: Boolean(output.metrics?.rmse),
+                  mae: Boolean(output.metrics?.mae),
+                  mape: Boolean(output.metrics?.mape),
+                  r2: Boolean(output.metrics?.r2),
+                  relDeviationPercents: Array.isArray(output.metrics?.relDeviationPercents) ? output.metrics.relDeviationPercents : formData.outputConfig.forecasting.metrics.relDeviationPercents,
+                  absDeviationValues: Array.isArray(output.metrics?.absDeviationValues) ? output.metrics.absDeviationValues : formData.outputConfig.forecasting.metrics.absDeviationValues,
+                  customMetrics: Array.isArray(output.metrics?.customMetrics) ? output.metrics.customMetrics : formData.outputConfig.forecasting.metrics.customMetrics,
+                },
+                visualizations: {
+                  lineChart: Boolean(output.visualizations?.lineChart),
+                  residualPlot: Boolean(output.visualizations?.residualPlot),
+                  predVsTrueScatter: Boolean(output.visualizations?.predVsTrueScatter),
+                  errorHistogram: Boolean(output.visualizations?.errorHistogram),
+                },
+              },
+            });
+          } else if (taskType === 'classification') {
+            const def = formData.outputConfig.classification.metrics;
+            handleInputChange('outputConfig', {
+              ...formData.outputConfig,
+              classification: {
+                metrics: {
+                  precision: { enabled: Boolean(output.metrics?.precision?.enabled), average: (output.metrics?.precision?.average as any) || def.precision.average },
+                  recall: { enabled: Boolean(output.metrics?.recall?.enabled), average: (output.metrics?.recall?.average as any) || def.recall.average },
+                  f1: { enabled: Boolean(output.metrics?.f1?.enabled), average: (output.metrics?.f1?.average as any) || def.f1.average },
+                  rocAuc: { enabled: Boolean(output.metrics?.rocAuc?.enabled), average: (output.metrics?.rocAuc?.average as any) || def.rocAuc.average },
+                },
+                visualizations: {
+                  rocCurve: Boolean(output.visualizations?.rocCurve),
+                  prCurve: Boolean(output.visualizations?.prCurve),
+                  confusionMatrix: Boolean(output.visualizations?.confusionMatrix),
+                },
+              },
+            });
+          } else if (taskType === 'regression') {
+            handleInputChange('outputConfig', {
+              ...formData.outputConfig,
+              regression: {
+                metrics: {
+                  mse: Boolean(output.metrics?.mse),
+                  rmse: Boolean(output.metrics?.rmse),
+                  mae: Boolean(output.metrics?.mae),
+                  mape: Boolean(output.metrics?.mape),
+                  r2: Boolean(output.metrics?.r2),
+                  relDeviationPercents: Array.isArray(output.metrics?.relDeviationPercents) ? output.metrics.relDeviationPercents : formData.outputConfig.regression.metrics.relDeviationPercents,
+                  absDeviationValues: Array.isArray(output.metrics?.absDeviationValues) ? output.metrics.absDeviationValues : formData.outputConfig.regression.metrics.absDeviationValues,
+                  customMetrics: Array.isArray(output.metrics?.customMetrics) ? output.metrics.customMetrics : formData.outputConfig.regression.metrics.customMetrics,
+                },
+                visualizations: {
+                  lineChart: Boolean(output.visualizations?.lineChart),
+                  residualPlot: Boolean(output.visualizations?.residualPlot),
+                  predVsTrueScatter: Boolean(output.visualizations?.predVsTrueScatter),
+                  errorHistogram: Boolean(output.visualizations?.errorHistogram),
+                },
+              },
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('导入输出配置预填失败，已忽略:', e);
+      }
     } catch (err) {
       console.error('导入 JSON 解析错误:', err);
       setJsonImportError('导入失败：JSON 解析错误，请检查文件内容');
@@ -1285,7 +1363,29 @@ interface FormData {
         description: formData.description,
         estimatedTime: formData.resourceConfig?.maxRunTime || undefined,
         config: formData.hyperparameterMode === 'json' 
-          ? formData.manualConfig 
+          ? (() => {
+              // 在 JSON 模式下，将输出配置并入用户提供的 JSON 配置（若缺失则补充），以便后端能统一读取
+              try {
+                const parsed = JSON.parse(formData.manualConfig);
+                if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                  const taskType = formData.taskType;
+                  const outputByType = (() => {
+                    if (taskType === 'forecasting') return formData.outputConfig.forecasting;
+                    if (taskType === 'classification') return formData.outputConfig.classification;
+                    return formData.outputConfig.regression;
+                  })();
+                  const merged = {
+                    ...parsed,
+                    output: parsed.output ?? outputByType,
+                    taskType: parsed.taskType ?? taskType,
+                    mode: parsed.mode ?? 'json',
+                  };
+                  return JSON.stringify(merged);
+                }
+              } catch (_) {}
+              // 如果解析失败或不是对象类型，则原样返回
+              return formData.manualConfig;
+            })()
           : (() => {
               const base: any = { mode: 'page', taskType: formData.taskType };
               if (formData.taskType === 'forecasting') {
@@ -1294,10 +1394,13 @@ interface FormData {
                   ...formData.forecastingConfig,
                   mainVariableFile: formData.forecastingConfig?.mainVariableFiles?.[0] || undefined,
                 };
+                base.output = { ...formData.outputConfig.forecasting };
               } else if (formData.taskType === 'classification') {
                 base.classification = { ...formData.classificationConfig };
+                base.output = { ...formData.outputConfig.classification };
               } else if (formData.taskType === 'regression') {
                 base.regression = { ...formData.regressionConfig };
+                base.output = { ...formData.outputConfig.regression };
               }
               return base;
             })(),
@@ -1373,16 +1476,39 @@ interface FormData {
           priority: formData.priority,
           description: formData.description,
           // 保持状态、进度不变，仅更新配置
-          config: formData.hyperparameterMode === 'json' 
-            ? formData.manualConfig 
+          config: formData.hyperparameterMode === 'json'
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(formData.manualConfig);
+                  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                    const taskType = formData.taskType;
+                    const outputByType = (() => {
+                      if (taskType === 'forecasting') return formData.outputConfig.forecasting;
+                      if (taskType === 'classification') return formData.outputConfig.classification;
+                      return formData.outputConfig.regression;
+                    })();
+                    const merged = {
+                      ...parsed,
+                      output: parsed.output ?? outputByType,
+                      taskType: parsed.taskType ?? taskType,
+                      mode: parsed.mode ?? 'json',
+                    };
+                    return JSON.stringify(merged);
+                  }
+                } catch (_) {}
+                return formData.manualConfig;
+              })()
             : (() => {
                 const base: any = { mode: 'page', taskType: formData.taskType };
                 if (formData.taskType === 'forecasting') {
                   base.forecasting = { ...formData.forecastingConfig };
+                  base.output = { ...formData.outputConfig.forecasting };
                 } else if (formData.taskType === 'classification') {
                   base.classification = { ...formData.classificationConfig };
+                  base.output = { ...formData.outputConfig.classification };
                 } else if (formData.taskType === 'regression') {
                   base.regression = { ...formData.regressionConfig };
+                  base.output = { ...formData.outputConfig.regression };
                 }
                 return base;
               })(),
@@ -1434,7 +1560,7 @@ interface FormData {
   };
 
   // 处理表单输入
-  const handleInputChange = (field: string, value: any) => {
+  const handleInputChange = <K extends keyof FormData>(field: K, value: FormData[K]) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -1575,72 +1701,163 @@ interface FormData {
       const editModels = parsedModels
         .map(n => nameToId.get(n))
         .filter((id): id is string => Boolean(id));
-      setFormData(prev => ({
-        ...prev,
-        taskName: task.taskName,
-        taskType: task.taskType,
-        projectId: matchedProjectId,
-        datasetName: matchedDataset?.id || '',
-        datasetVersion: task.datasetVersion || '',
-        selectedDataset: matchedDataset || null,
-        selectedDatasets: task.datasets ?? [],
-        modelSelectionMode: 'multiple',
-        modelName: task.modelName,
-        models: editModels,
-        targetFields: [],
-        availableFields,
-        priority: task.priority,
-        description: task.description || '',
-        config: typeof task.config === 'string' ? task.config : '',
-        hyperparameterMode: typeof task.config === 'string' ? 'json' : 'page',
-        forecastingConfig: (typeof task.config === 'object' && task.config?.forecasting)
-          ? {
-              timeColumn: task.config.forecasting.timeColumn ?? '',
-              contextLength: task.config.forecasting.contextLength ?? 24,
-              forecastLength: task.config.forecasting.forecastLength ?? 12,
-              stepLength: task.config.forecasting.stepLength ?? 1,
-              startTime: task.config.forecasting.startTime ?? '',
-              // 兼容旧数据：如果只存在 mainVariableFile，则转为数组
-              mainVariableFiles: (task.config.forecasting.mainVariableFiles
-                ? task.config.forecasting.mainVariableFiles
-                : (task.config.forecasting.mainVariableFile ? [task.config.forecasting.mainVariableFile] : [])),
-              covariateFiles: task.config.forecasting.covariateFiles ?? []
+      setFormData(prev => {
+        const parsedCfg = (() => {
+          try {
+            if (typeof task.config === 'string') return JSON.parse(task.config);
+            if (typeof task.config === 'object' && task.config !== null) return task.config;
+            return null;
+          } catch (_) { return null; }
+        })();
+        const parsedOutput: any = parsedCfg?.output;
+        return {
+          ...prev,
+          taskName: task.taskName,
+          taskType: task.taskType,
+          projectId: matchedProjectId,
+          datasetName: matchedDataset?.id || '',
+          datasetVersion: task.datasetVersion || '',
+          selectedDataset: matchedDataset || null,
+          selectedDatasets: task.datasets ?? [],
+          modelSelectionMode: 'multiple',
+          modelName: task.modelName,
+          models: editModels,
+          targetFields: [],
+          availableFields,
+          priority: task.priority,
+          description: task.description || '',
+          config: typeof task.config === 'string' ? task.config : '',
+          hyperparameterMode: typeof task.config === 'string' ? 'json' : 'page',
+          forecastingConfig: (typeof parsedCfg === 'object' && parsedCfg?.forecasting)
+            ? {
+                timeColumn: parsedCfg.forecasting.timeColumn ?? '',
+                contextLength: parsedCfg.forecasting.contextLength ?? 24,
+                forecastLength: parsedCfg.forecasting.forecastLength ?? 12,
+                stepLength: parsedCfg.forecasting.stepLength ?? 1,
+                startTime: parsedCfg.forecasting.startTime ?? '',
+                // 兼容旧数据：如果只存在 mainVariableFile，则转为数组
+                mainVariableFiles: (parsedCfg.forecasting.mainVariableFiles
+                  ? parsedCfg.forecasting.mainVariableFiles
+                  : (parsedCfg.forecasting.mainVariableFile ? [parsedCfg.forecasting.mainVariableFile] : [])),
+                covariateFiles: parsedCfg.forecasting.covariateFiles ?? []
+              }
+            : {
+                timeColumn: '',
+                contextLength: 24,
+                forecastLength: 12,
+                stepLength: 1,
+                startTime: '',
+                mainVariableFiles: [],
+                covariateFiles: []
+              },
+          classificationConfig: (typeof parsedCfg === 'object' && parsedCfg?.classification)
+            ? {
+                trainRatio: parsedCfg.classification.trainRatio ?? 80,
+                testRatio: parsedCfg.classification.testRatio ?? 20,
+                shuffle: parsedCfg.classification.shuffle ?? false
+              }
+            : {
+                trainRatio: 80,
+                testRatio: 20,
+                shuffle: false
+              },
+          regressionConfig: (typeof parsedCfg === 'object' && parsedCfg?.regression)
+            ? {
+                trainRatio: parsedCfg.regression.trainRatio ?? 80,
+                testRatio: parsedCfg.regression.testRatio ?? 20,
+                shuffle: parsedCfg.regression.shuffle ?? false
+              }
+            : {
+                trainRatio: 80,
+                testRatio: 20,
+                shuffle: false
+              },
+          manualConfig: typeof task.config === 'string' ? task.config : '',
+          outputConfig: (() => {
+            const current = prev.outputConfig;
+            if (parsedOutput && typeof parsedOutput === 'object' && !Array.isArray(parsedOutput)) {
+              if (task.taskType === 'forecasting') {
+                return {
+                  ...current,
+                  forecasting: {
+                    metrics: {
+                      mse: Boolean(parsedOutput.metrics?.mse ?? current.forecasting.metrics.mse),
+                      rmse: Boolean(parsedOutput.metrics?.rmse ?? current.forecasting.metrics.rmse),
+                      mae: Boolean(parsedOutput.metrics?.mae ?? current.forecasting.metrics.mae),
+                      mape: Boolean(parsedOutput.metrics?.mape ?? current.forecasting.metrics.mape),
+                      r2: Boolean(parsedOutput.metrics?.r2 ?? current.forecasting.metrics.r2),
+                      relDeviationPercents: Array.isArray(parsedOutput.metrics?.relDeviationPercents)
+                        ? parsedOutput.metrics.relDeviationPercents
+                        : current.forecasting.metrics.relDeviationPercents,
+                      absDeviationValues: Array.isArray(parsedOutput.metrics?.absDeviationValues)
+                        ? parsedOutput.metrics.absDeviationValues
+                        : current.forecasting.metrics.absDeviationValues,
+                      customMetrics: Array.isArray(parsedOutput.metrics?.customMetrics)
+                        ? parsedOutput.metrics.customMetrics
+                        : current.forecasting.metrics.customMetrics,
+                    },
+                    visualizations: {
+                      lineChart: Boolean(parsedOutput.visualizations?.lineChart ?? current.forecasting.visualizations.lineChart),
+                      residualPlot: Boolean(parsedOutput.visualizations?.residualPlot ?? current.forecasting.visualizations.residualPlot),
+                      predVsTrueScatter: Boolean(parsedOutput.visualizations?.predVsTrueScatter ?? current.forecasting.visualizations.predVsTrueScatter),
+                      errorHistogram: Boolean(parsedOutput.visualizations?.errorHistogram ?? current.forecasting.visualizations.errorHistogram),
+                    },
+                  },
+                };
+              } else if (task.taskType === 'classification') {
+                const def = current.classification.metrics;
+                return {
+                  ...current,
+                  classification: {
+                    metrics: {
+                      precision: { enabled: Boolean(parsedOutput.metrics?.precision?.enabled ?? def.precision.enabled), average: (parsedOutput.metrics?.precision?.average as AverageMethod) || def.precision.average },
+                      recall: { enabled: Boolean(parsedOutput.metrics?.recall?.enabled ?? def.recall.enabled), average: (parsedOutput.metrics?.recall?.average as AverageMethod) || def.recall.average },
+                      f1: { enabled: Boolean(parsedOutput.metrics?.f1?.enabled ?? def.f1.enabled), average: (parsedOutput.metrics?.f1?.average as AverageMethod) || def.f1.average },
+                      rocAuc: { enabled: Boolean(parsedOutput.metrics?.rocAuc?.enabled ?? def.rocAuc.enabled), average: (parsedOutput.metrics?.rocAuc?.average as AverageMethod) || def.rocAuc.average },
+                    },
+                    visualizations: {
+                      rocCurve: Boolean(parsedOutput.visualizations?.rocCurve ?? current.classification.visualizations.rocCurve),
+                      prCurve: Boolean(parsedOutput.visualizations?.prCurve ?? current.classification.visualizations.prCurve),
+                      confusionMatrix: Boolean(parsedOutput.visualizations?.confusionMatrix ?? current.classification.visualizations.confusionMatrix),
+                    },
+                  },
+                };
+              } else if (task.taskType === 'regression') {
+                return {
+                  ...current,
+                  regression: {
+                    metrics: {
+                      mse: Boolean(parsedOutput.metrics?.mse ?? current.regression.metrics.mse),
+                      rmse: Boolean(parsedOutput.metrics?.rmse ?? current.regression.metrics.rmse),
+                      mae: Boolean(parsedOutput.metrics?.mae ?? current.regression.metrics.mae),
+                      mape: Boolean(parsedOutput.metrics?.mape ?? current.regression.metrics.mape),
+                      r2: Boolean(parsedOutput.metrics?.r2 ?? current.regression.metrics.r2),
+                      relDeviationPercents: Array.isArray(parsedOutput.metrics?.relDeviationPercents)
+                        ? parsedOutput.metrics.relDeviationPercents
+                        : current.regression.metrics.relDeviationPercents,
+                      absDeviationValues: Array.isArray(parsedOutput.metrics?.absDeviationValues)
+                        ? parsedOutput.metrics.absDeviationValues
+                        : current.regression.metrics.absDeviationValues,
+                      customMetrics: Array.isArray(parsedOutput.metrics?.customMetrics)
+                        ? parsedOutput.metrics.customMetrics
+                        : current.regression.metrics.customMetrics,
+                    },
+                    visualizations: {
+                      lineChart: Boolean(parsedOutput.visualizations?.lineChart ?? current.regression.visualizations.lineChart),
+                      residualPlot: Boolean(parsedOutput.visualizations?.residualPlot ?? current.regression.visualizations.residualPlot),
+                      predVsTrueScatter: Boolean(parsedOutput.visualizations?.predVsTrueScatter ?? current.regression.visualizations.predVsTrueScatter),
+                      errorHistogram: Boolean(parsedOutput.visualizations?.errorHistogram ?? current.regression.visualizations.errorHistogram),
+                    },
+                  },
+                };
+              }
             }
-          : {
-              timeColumn: '',
-              contextLength: 24,
-              forecastLength: 12,
-              stepLength: 1,
-              startTime: '',
-              mainVariableFiles: [],
-              covariateFiles: []
-            },
-        classificationConfig: (typeof task.config === 'object' && task.config?.classification)
-          ? {
-              trainRatio: task.config.classification.trainRatio ?? 80,
-              testRatio: task.config.classification.testRatio ?? 20,
-              shuffle: task.config.classification.shuffle ?? false
-            }
-          : {
-              trainRatio: 80,
-              testRatio: 20,
-              shuffle: false
-            },
-        regressionConfig: (typeof task.config === 'object' && task.config?.regression)
-          ? {
-              trainRatio: task.config.regression.trainRatio ?? 80,
-              testRatio: task.config.regression.testRatio ?? 20,
-              shuffle: task.config.regression.shuffle ?? false
-            }
-          : {
-              trainRatio: 80,
-              testRatio: 20,
-              shuffle: false
-            },
-        manualConfig: typeof task.config === 'string' ? task.config : '',
-        resourceType: 'auto',
-        resourceConfig: { cores: 4, memory: 8, maxRunTime: 120 },
-      }));
+            return current;
+          })(),
+          resourceType: 'auto',
+          resourceConfig: { cores: 4, memory: 8, maxRunTime: 120 },
+        };
+      });
       setIsEditMode(true);
       setEditingTask(task);
       setIsCreateTaskOpen(true);
@@ -1757,7 +1974,7 @@ interface FormData {
   const filteredTasks = getFilteredAndSortedTasks();
 
   // 示例对比数据（分类任务）
-  const taskCompareDemoA = {
+  const taskCompareDemoA: TaskCompareItem = {
     info: { id: 'TC-A', name: '分类任务 A', dataset: 'CreditRisk v1.0', model: 'AutoGluon (v0.8)' },
     type: 'classification' as const,
     metrics: {
@@ -1771,7 +1988,7 @@ interface FormData {
         [420, 80],
         [70, 430]
       ],
-      ci95: { accuracy: [0.84, 0.88] }
+      ci95: { accuracy: [0.84, 0.88] as [number, number] }
     },
     causalGraph: {
       nodes: [
@@ -1798,7 +2015,7 @@ interface FormData {
     warnings: ['评估阶段出现少量类别不平衡']
   };
 
-  const taskCompareDemoB = {
+  const taskCompareDemoB: TaskCompareItem = {
     info: { id: 'TC-B', name: '分类任务 B', dataset: 'CreditRisk v1.0', model: 'LimX (v1.2)' },
     type: 'classification' as const,
     metrics: {
@@ -1812,7 +2029,7 @@ interface FormData {
         [450, 50],
         [55, 445]
       ],
-      ci95: { accuracy: [0.88, 0.92] }
+      ci95: { accuracy: [0.88, 0.92] as [number, number] }
     },
     causalGraph: {
       nodes: [
@@ -1840,7 +2057,7 @@ interface FormData {
   };
 
   // 示例对比数据（回归任务）
-  const taskCompareRegA = {
+  const taskCompareRegA: TaskCompareItem = {
     info: { id: 'TR-A', name: '回归任务 A', dataset: 'HousePrice v2.0', model: 'XGBoostRegressor (v1.0)' },
     type: 'regression' as const,
     metrics: {
@@ -1875,7 +2092,7 @@ interface FormData {
     warnings: ['数据标准化后效果更稳定']
   };
 
-  const taskCompareRegB = {
+  const taskCompareRegB: TaskCompareItem = {
     info: { id: 'TR-B', name: '回归任务 B', dataset: 'HousePrice v2.0', model: 'LightGBMRegressor (v3.2)' },
     type: 'regression' as const,
     metrics: {
@@ -1915,7 +2132,7 @@ interface FormData {
     const actual = 50 + i * 0.8 + Math.sin(i / 4) * 5 + (Math.random() - 0.5) * 2;
     return actual;
   });
-  const taskCompareFctA = {
+  const taskCompareFctA: TaskCompareItem = {
     info: { id: 'TF-A', name: '时序预测任务 A', dataset: 'EnergyLoad v1.0', model: 'Prophet (v1.1)' },
     type: 'forecasting' as const,
     metrics: (() => {
@@ -1952,7 +2169,7 @@ interface FormData {
     warnings: ['节假日影响导致误差波动']
   };
 
-  const taskCompareFctB = {
+  const taskCompareFctB: TaskCompareItem = {
     info: { id: 'TF-B', name: '时序预测任务 B', dataset: 'EnergyLoad v1.0', model: 'AutoTS (v0.6)' },
     type: 'forecasting' as const,
     metrics: (() => {
@@ -2005,7 +2222,7 @@ interface FormData {
           </Button>
 
           {/* 示例类型选择：分类/回归/时序预测 */}
-          <Select value={compareDemoType} onValueChange={(value) => setCompareDemoType(value as TaskType)}>
+          <Select value={compareDemoType} onValueChange={(value: TaskType) => setCompareDemoType(value)}>
             <SelectTrigger className="w-[140px]">
               <SelectValue placeholder="示例类型" />
             </SelectTrigger>
@@ -2070,6 +2287,7 @@ interface FormData {
                 config: '',
                 hyperparameterMode: 'page',
               forecastingConfig: {
+                timeColumn: '',
                 contextLength: 24,
                 forecastLength: 12,
                 stepLength: 1,
@@ -2086,6 +2304,58 @@ interface FormData {
                   trainRatio: 80,
                   testRatio: 20,
                   shuffle: false
+                },
+                // 输出配置默认值（关闭弹窗时重置）
+                outputConfig: {
+                  forecasting: {
+                    metrics: {
+                      mse: true,
+                      rmse: true,
+                      mae: true,
+                      mape: true,
+                      r2: true,
+                      relDeviationPercents: [10, 20],
+                      absDeviationValues: [10, 20],
+                      customMetrics: []
+                    },
+                    visualizations: {
+                      lineChart: true,
+                      residualPlot: true,
+                      predVsTrueScatter: true,
+                      errorHistogram: true
+                    }
+                  },
+                  classification: {
+                    metrics: {
+                      precision: { enabled: true, average: 'binary' },
+                      recall: { enabled: true, average: 'binary' },
+                      f1: { enabled: true, average: 'macro' },
+                      rocAuc: { enabled: true, average: 'macro' }
+                    },
+                    visualizations: {
+                      rocCurve: true,
+                      prCurve: true,
+                      confusionMatrix: true
+                    }
+                  },
+                  regression: {
+                    metrics: {
+                      mse: true,
+                      rmse: true,
+                      mae: true,
+                      mape: true,
+                      r2: true,
+                      relDeviationPercents: [10, 20],
+                      absDeviationValues: [10, 20],
+                      customMetrics: []
+                    },
+                    visualizations: {
+                      lineChart: true,
+                      residualPlot: true,
+                      predVsTrueScatter: true,
+                      errorHistogram: true
+                    }
+                  }
                 },
                 manualConfig: '',
                 resourceType: 'auto',
@@ -2185,7 +2455,7 @@ interface FormData {
                           <span>任务类型</span>
                           <span className="text-red-500">*</span>
                         </Label>
-                        <Select value={formData.taskType} onValueChange={(value) => handleInputChange('taskType', value)}>
+                        <Select value={formData.taskType} onValueChange={(value: TaskType) => handleInputChange('taskType', value)}>
                           <SelectTrigger className={formErrors.taskType ? 'border-red-500' : ''}>
                             <SelectValue />
                           </SelectTrigger>
@@ -2204,7 +2474,7 @@ interface FormData {
                           <span>所属项目</span>
                           <span className="text-red-500">*</span>
                         </Label>
-                        <Select value={formData.projectId} onValueChange={(value) => handleInputChange('projectId', value)}>
+                        <Select value={formData.projectId} onValueChange={(value: string) => handleInputChange('projectId', value)}>
                           <SelectTrigger className={formErrors.projectId ? 'border-red-500' : ''}>
                             <SelectValue placeholder="选择所属项目" />
                           </SelectTrigger>
@@ -2243,7 +2513,7 @@ interface FormData {
                             <span>资源类型</span>
                             <span className="text-red-500">*</span>
                           </Label>
-                          <Select value={formData.resourceType} onValueChange={(value) => handleInputChange('resourceType', value)}>
+                          <Select value={formData.resourceType} onValueChange={(value: 'auto' | 'cpu' | 'gpu') => handleInputChange('resourceType', value)}>
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
@@ -2259,7 +2529,7 @@ interface FormData {
                             <span>任务优先级</span>
                             <span className="text-red-500">*</span>
                           </Label>
-                          <Select value={formData.priority} onValueChange={(value) => handleInputChange('priority', value)}>
+                          <Select value={formData.priority} onValueChange={(value: 'low' | 'medium' | 'high') => handleInputChange('priority', value)}>
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
@@ -2366,7 +2636,7 @@ interface FormData {
                         </Label>
                         <Select 
                           value={formData.datasetName} 
-                          onValueChange={(value) => {
+                          onValueChange={(value: string) => {
                             const selectedDataset = availableDatasets.find(d => d.id === value);
                             // 提取数据集字段
                             const availableFields = selectedDataset?.previewData && selectedDataset.previewData.length > 0 
@@ -2490,7 +2760,7 @@ interface FormData {
                         </Label>
                         <Select 
                           value={formData.datasetVersion} 
-                          onValueChange={(value) => handleInputChange('datasetVersion', value)}
+                          onValueChange={(value: string) => handleInputChange('datasetVersion', value)}
                           disabled={!formData.datasetName}
                         >
                           <SelectTrigger className={formErrors.datasetVersion ? 'border-red-500' : ''}>
@@ -2547,7 +2817,7 @@ interface FormData {
                                 </button>
                                 <Select
                                   value={ds.version}
-                                  onValueChange={(value) => updateSelectedDatasetVersion(ds.id, value)}
+                                  onValueChange={(value: string) => updateSelectedDatasetVersion(ds.id, value) }
                                 >
                                   <SelectTrigger className="h-7 text-xs w-28 bg-transparent border-none shadow-none px-1 focus:ring-0">
                                     <SelectValue />
@@ -2640,7 +2910,7 @@ interface FormData {
                                     <Checkbox
                                       id={`field-${field}`}
                                       checked={formData.targetFields.includes(field)}
-                                      onCheckedChange={(checked) => {
+                                      onCheckedChange={(checked: boolean) => {
                                         const newTargetFields = checked
                                           ? [...formData.targetFields, field]
                                           : formData.targetFields.filter(f => f !== field);
@@ -2868,7 +3138,7 @@ interface FormData {
                                 {formData.availableFields.length > 0 ? (
                                   <Select
                                     value={formData.forecastingConfig.timeColumn || ''}
-                                    onValueChange={(value) =>
+                                    onValueChange={(value: string) =>
                                       handleInputChange('forecastingConfig', {
                                         ...formData.forecastingConfig,
                                         timeColumn: value,
@@ -3134,7 +3404,7 @@ interface FormData {
                               <Checkbox
                                 id="class-shuffle"
                                 checked={formData.classificationConfig.shuffle}
-                                onCheckedChange={(checked) => handleInputChange('classificationConfig', {
+                                onCheckedChange={(checked: boolean) => handleInputChange('classificationConfig', {
                                   ...formData.classificationConfig,
                                   shuffle: Boolean(checked)
                                 })}
@@ -3193,7 +3463,7 @@ interface FormData {
                               <Checkbox
                                 id="reg-shuffle"
                                 checked={formData.regressionConfig.shuffle}
-                                onCheckedChange={(checked) => handleInputChange('regressionConfig', {
+                                onCheckedChange={(checked: boolean) => handleInputChange('regressionConfig', {
                                   ...formData.regressionConfig,
                                   shuffle: Boolean(checked)
                                 })}
@@ -3205,6 +3475,635 @@ interface FormData {
                             )}
                           </div>
                         )}
+
+                        {/* 输出配置 */}
+                        <div className="space-y-4 mt-2">
+                          <div className="flex items-center space-x-2 text-blue-700">
+                            <BarChart3 className="h-4 w-4" />
+                            <span className="font-medium">输出配置</span>
+                          </div>
+
+                          {/* 时序预测输出配置 */}
+                          {formData.taskType === 'forecasting' && (
+                            <div className="space-y-3">
+                              <div>
+                                <Label className="text-sm font-medium">评估指标</Label>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-mse"
+                                      checked={formData.outputConfig.forecasting.metrics.mse}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          metrics: { ...formData.outputConfig.forecasting.metrics, mse: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-mse" className="text-sm">MSE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-rmse"
+                                      checked={formData.outputConfig.forecasting.metrics.rmse}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          metrics: { ...formData.outputConfig.forecasting.metrics, rmse: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-rmse" className="text-sm">RMSE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-mae"
+                                      checked={formData.outputConfig.forecasting.metrics.mae}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          metrics: { ...formData.outputConfig.forecasting.metrics, mae: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-mae" className="text-sm">MAE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-mape"
+                                      checked={formData.outputConfig.forecasting.metrics.mape}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          metrics: { ...formData.outputConfig.forecasting.metrics, mape: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-mape" className="text-sm">MAPE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-r2"
+                                      checked={formData.outputConfig.forecasting.metrics.r2}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          metrics: { ...formData.outputConfig.forecasting.metrics, r2: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-r2" className="text-sm">R²</Label>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                                  <div>
+                                    <Label htmlFor="fct-rel-dev" className="text-sm">相对偏差阈值(±%)</Label>
+                                    <Input
+                                      id="fct-rel-dev"
+                                      value={formData.outputConfig.forecasting.metrics.relDeviationPercents.join(', ')}
+                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        handleInputChange('outputConfig', {
+                                          ...formData.outputConfig,
+                                          forecasting: {
+                                            ...formData.outputConfig.forecasting,
+                                            metrics: { ...formData.outputConfig.forecasting.metrics, relDeviationPercents: nums }
+                                          }
+                                        });
+                                      }}
+                                      placeholder="如: 10, 20"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label htmlFor="fct-abs-dev" className="text-sm">绝对偏差阈值(±)</Label>
+                                    <Input
+                                      id="fct-abs-dev"
+                                      value={formData.outputConfig.forecasting.metrics.absDeviationValues.join(', ')}
+                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        handleInputChange('outputConfig', {
+                                          ...formData.outputConfig,
+                                          forecasting: {
+                                            ...formData.outputConfig.forecasting,
+                                            metrics: { ...formData.outputConfig.forecasting.metrics, absDeviationValues: nums }
+                                          }
+                                        });
+                                      }}
+                                      placeholder="如: 10, 20"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label htmlFor="fct-custom-metrics" className="text-sm">自定义指标</Label>
+                                    <Input
+                                      id="fct-custom-metrics"
+                                      value={formData.outputConfig.forecasting.metrics.customMetrics.join(', ')}
+                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                        const items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                        handleInputChange('outputConfig', {
+                                          ...formData.outputConfig,
+                                          forecasting: {
+                                            ...formData.outputConfig.forecasting,
+                                            metrics: { ...formData.outputConfig.forecasting.metrics, customMetrics: items }
+                                          }
+                                        });
+                                      }}
+                                      placeholder="如: smape, mase"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <Label className="text-sm font-medium">可视化</Label>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-line"
+                                      checked={formData.outputConfig.forecasting.visualizations.lineChart}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          visualizations: { ...formData.outputConfig.forecasting.visualizations, lineChart: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-line" className="text-sm">折线图</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-residual"
+                                      checked={formData.outputConfig.forecasting.visualizations.residualPlot}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          visualizations: { ...formData.outputConfig.forecasting.visualizations, residualPlot: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-residual" className="text-sm">残差图</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-scatter"
+                                      checked={formData.outputConfig.forecasting.visualizations.predVsTrueScatter}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          visualizations: { ...formData.outputConfig.forecasting.visualizations, predVsTrueScatter: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-scatter" className="text-sm">预测vs真实散点</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="fct-hist"
+                                      checked={formData.outputConfig.forecasting.visualizations.errorHistogram}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        forecasting: {
+                                          ...formData.outputConfig.forecasting,
+                                          visualizations: { ...formData.outputConfig.forecasting.visualizations, errorHistogram: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="fct-hist" className="text-sm">误差直方图</Label>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 分类输出配置 */}
+                          {formData.taskType === 'classification' && (
+                            <div className="space-y-3">
+                              <div>
+                                <Label className="text-sm font-medium">评估指标与平均方式</Label>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                                  {/* Precision */}
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="cls-precision"
+                                      checked={formData.outputConfig.classification.metrics.precision.enabled}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            precision: { ...formData.outputConfig.classification.metrics.precision, enabled: Boolean(checked) }
+                                          }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-precision" className="text-sm w-20">Precision</Label>
+                                    <Select
+                                      value={formData.outputConfig.classification.metrics.precision.average}
+                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            precision: { ...formData.outputConfig.classification.metrics.precision, average: value }
+                                          }
+                                        }
+                                      })}
+                                    >
+                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="micro">micro</SelectItem>
+                                        <SelectItem value="macro">macro</SelectItem>
+                                        <SelectItem value="samples">samples</SelectItem>
+                                        <SelectItem value="weighted">weighted</SelectItem>
+                                        <SelectItem value="binary">binary</SelectItem>
+                                        <SelectItem value="none">none</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  {/* Recall */}
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="cls-recall"
+                                      checked={formData.outputConfig.classification.metrics.recall.enabled}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            recall: { ...formData.outputConfig.classification.metrics.recall, enabled: Boolean(checked) }
+                                          }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-recall" className="text-sm w-20">Recall</Label>
+                                    <Select
+                                      value={formData.outputConfig.classification.metrics.recall.average}
+                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            recall: { ...formData.outputConfig.classification.metrics.recall, average: value }
+                                          }
+                                        }
+                                      })}
+                                    >
+                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="micro">micro</SelectItem>
+                                        <SelectItem value="macro">macro</SelectItem>
+                                        <SelectItem value="samples">samples</SelectItem>
+                                        <SelectItem value="weighted">weighted</SelectItem>
+                                        <SelectItem value="binary">binary</SelectItem>
+                                        <SelectItem value="none">none</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  {/* F1 */}
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="cls-f1"
+                                      checked={formData.outputConfig.classification.metrics.f1.enabled}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            f1: { ...formData.outputConfig.classification.metrics.f1, enabled: Boolean(checked) }
+                                          }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-f1" className="text-sm w-20">F1</Label>
+                                    <Select
+                                      value={formData.outputConfig.classification.metrics.f1.average}
+                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            f1: { ...formData.outputConfig.classification.metrics.f1, average: value }
+                                          }
+                                        }
+                                      })}
+                                    >
+                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="micro">micro</SelectItem>
+                                        <SelectItem value="macro">macro</SelectItem>
+                                        <SelectItem value="samples">samples</SelectItem>
+                                        <SelectItem value="weighted">weighted</SelectItem>
+                                        <SelectItem value="binary">binary</SelectItem>
+                                        <SelectItem value="none">none</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  {/* ROC-AUC */}
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="cls-rocauc"
+                                      checked={formData.outputConfig.classification.metrics.rocAuc.enabled}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            rocAuc: { ...formData.outputConfig.classification.metrics.rocAuc, enabled: Boolean(checked) }
+                                          }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-rocauc" className="text-sm w-20">ROC-AUC</Label>
+                                    <Select
+                                      value={formData.outputConfig.classification.metrics.rocAuc.average}
+                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            rocAuc: { ...formData.outputConfig.classification.metrics.rocAuc, average: value }
+                                          }
+                                        }
+                                      })}
+                                    >
+                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="micro">micro</SelectItem>
+                                        <SelectItem value="macro">macro</SelectItem>
+                                        <SelectItem value="samples">samples</SelectItem>
+                                        <SelectItem value="weighted">weighted</SelectItem>
+                                        <SelectItem value="binary">binary</SelectItem>
+                                        <SelectItem value="none">none</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <Label className="text-sm font-medium">可视化</Label>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="cls-roc"
+                                      checked={formData.outputConfig.classification.visualizations.rocCurve}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          visualizations: { ...formData.outputConfig.classification.visualizations, rocCurve: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-roc" className="text-sm">ROC 曲线</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="cls-pr"
+                                      checked={formData.outputConfig.classification.visualizations.prCurve}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          visualizations: { ...formData.outputConfig.classification.visualizations, prCurve: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-pr" className="text-sm">PR 曲线</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="cls-conf"
+                                      checked={formData.outputConfig.classification.visualizations.confusionMatrix}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          visualizations: { ...formData.outputConfig.classification.visualizations, confusionMatrix: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-conf" className="text-sm">混淆矩阵</Label>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 回归输出配置 */}
+                          {formData.taskType === 'regression' && (
+                            <div className="space-y-3">
+                              <div>
+                                <Label className="text-sm font-medium">评估指标</Label>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-mse"
+                                      checked={formData.outputConfig.regression.metrics.mse}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          metrics: { ...formData.outputConfig.regression.metrics, mse: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-mse" className="text-sm">MSE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-rmse"
+                                      checked={formData.outputConfig.regression.metrics.rmse}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          metrics: { ...formData.outputConfig.regression.metrics, rmse: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-rmse" className="text-sm">RMSE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-mae"
+                                      checked={formData.outputConfig.regression.metrics.mae}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          metrics: { ...formData.outputConfig.regression.metrics, mae: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-mae" className="text-sm">MAE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-mape"
+                                      checked={formData.outputConfig.regression.metrics.mape}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          metrics: { ...formData.outputConfig.regression.metrics, mape: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-mape" className="text-sm">MAPE</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-r2"
+                                      checked={formData.outputConfig.regression.metrics.r2}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          metrics: { ...formData.outputConfig.regression.metrics, r2: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-r2" className="text-sm">R²</Label>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                                  <div>
+                                    <Label htmlFor="reg-rel-dev" className="text-sm">相对偏差阈值(±%)</Label>
+                                    <Input
+                                      id="reg-rel-dev"
+                                      value={formData.outputConfig.regression.metrics.relDeviationPercents.join(', ')}
+                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        handleInputChange('outputConfig', {
+                                          ...formData.outputConfig,
+                                          regression: {
+                                            ...formData.outputConfig.regression,
+                                            metrics: { ...formData.outputConfig.regression.metrics, relDeviationPercents: nums }
+                                          }
+                                        });
+                                      }}
+                                      placeholder="如: 10, 20"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label htmlFor="reg-abs-dev" className="text-sm">绝对偏差阈值(±)</Label>
+                                    <Input
+                                      id="reg-abs-dev"
+                                      value={formData.outputConfig.regression.metrics.absDeviationValues.join(', ')}
+                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        handleInputChange('outputConfig', {
+                                          ...formData.outputConfig,
+                                          regression: {
+                                            ...formData.outputConfig.regression,
+                                            metrics: { ...formData.outputConfig.regression.metrics, absDeviationValues: nums }
+                                          }
+                                        });
+                                      }}
+                                      placeholder="如: 10, 20"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label htmlFor="reg-custom-metrics" className="text-sm">自定义指标</Label>
+                                    <Input
+                                      id="reg-custom-metrics"
+                                      value={formData.outputConfig.regression.metrics.customMetrics.join(', ')}
+                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                        const items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                        handleInputChange('outputConfig', {
+                                          ...formData.outputConfig,
+                                          regression: {
+                                            ...formData.outputConfig.regression,
+                                            metrics: { ...formData.outputConfig.regression.metrics, customMetrics: items }
+                                          }
+                                        });
+                                      }}
+                                      placeholder="如: smape, mase"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <Label className="text-sm font-medium">可视化</Label>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-line"
+                                      checked={formData.outputConfig.regression.visualizations.lineChart}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          visualizations: { ...formData.outputConfig.regression.visualizations, lineChart: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-line" className="text-sm">折线图</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-residual"
+                                      checked={formData.outputConfig.regression.visualizations.residualPlot}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          visualizations: { ...formData.outputConfig.regression.visualizations, residualPlot: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-residual" className="text-sm">残差图</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-scatter"
+                                      checked={formData.outputConfig.regression.visualizations.predVsTrueScatter}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          visualizations: { ...formData.outputConfig.regression.visualizations, predVsTrueScatter: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-scatter" className="text-sm">预测vs真实散点</Label>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id="reg-hist"
+                                      checked={formData.outputConfig.regression.visualizations.errorHistogram}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        regression: {
+                                          ...formData.outputConfig.regression,
+                                          visualizations: { ...formData.outputConfig.regression.visualizations, errorHistogram: Boolean(checked) }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="reg-hist" className="text-sm">误差直方图</Label>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
 
                         <div className="bg-blue-100 p-3 rounded border border-blue-200">
                           <p className="text-sm text-blue-800">
@@ -3400,7 +4299,7 @@ interface FormData {
               
               <div>
                 <Label>任务类型</Label>
-                <Select value={filters.taskType} onValueChange={(value) => handleFilterChange('taskType', value)}>
+                <Select value={filters.taskType} onValueChange={(value: string) => handleFilterChange('taskType', value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -3415,7 +4314,7 @@ interface FormData {
 
               <div>
                 <Label>状态</Label>
-                <Select value={filters.status} onValueChange={(value) => handleFilterChange('status', value)}>
+                <Select value={filters.status} onValueChange={(value: string) => handleFilterChange('status', value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -3433,7 +4332,7 @@ interface FormData {
 
               <div>
                 <Label>所属项目</Label>
-                <Select value={filters.projectId ?? 'all'} onValueChange={(value) => handleFilterChange('projectId', value)}>
+                <Select value={filters.projectId ?? 'all'} onValueChange={(value: string) => handleFilterChange('projectId', value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -3448,7 +4347,7 @@ interface FormData {
 
               <div>
                 <Label>优先级</Label>
-                <Select value={filters.priority} onValueChange={(value) => handleFilterChange('priority', value)}>
+                <Select value={filters.priority} onValueChange={(value: string) => handleFilterChange('priority', value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -3728,7 +4627,7 @@ interface FormData {
                         <TableCell>
                           <Checkbox
                             checked={selectedTaskIds.includes(task.id)}
-                            onCheckedChange={(checked) => handleTaskSelection(task.id, checked as boolean)}
+                            onCheckedChange={(checked: boolean) => handleTaskSelection(task.id, checked)}
                           />
                         </TableCell>
                         <TableCell>
@@ -3919,7 +4818,7 @@ interface FormData {
                           <div className="flex items-center space-x-2 mb-2">
                             <Checkbox
                               checked={selectedTaskIds.includes(task.id)}
-                              onCheckedChange={(checked) => handleTaskSelection(task.id, checked as boolean)}
+                              onCheckedChange={(checked: boolean) => handleTaskSelection(task.id, checked)}
                             />
                             <code className="text-xs bg-gray-100 px-2 py-1 rounded">
                               {task.id}

@@ -108,6 +108,9 @@ interface TaskCompareProps {
   onBack: () => void;
 }
 
+// Export key types for external usage (e.g., TaskManagement preview data)
+export type { TaskType, TaskCompareItem };
+
 function DiffBadge({ a, b }: { a: string | number; b: string | number }) {
   if (a === b) {
     return <Badge variant="secondary">一致</Badge>;

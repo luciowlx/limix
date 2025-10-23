@@ -617,7 +617,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
               <Label htmlFor="project">所属项目 *</Label>
               <Select
                 value={formData.projectId}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, projectId: value }))}
+                onValueChange={(value: string) => setFormData(prev => ({ ...prev, projectId: value }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="请选择所属项目" />

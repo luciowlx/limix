@@ -315,7 +315,7 @@ export function RoleManagement() {
                 <TableHead className="w-12">
                   <Checkbox
                     checked={selectedRoles.length === filteredRoles.length && filteredRoles.length > 0}
-                    onCheckedChange={(checked) => {
+                    onCheckedChange={(checked: boolean) => {
                       if (checked) {
                         setSelectedRoles(filteredRoles.map(role => role.id));
                       } else {
@@ -339,7 +339,7 @@ export function RoleManagement() {
                   <TableCell>
                     <Checkbox
                       checked={selectedRoles.includes(role.id)}
-                      onCheckedChange={(checked) => {
+                      onCheckedChange={(checked: boolean) => {
                         if (checked) {
                           setSelectedRoles([...selectedRoles, role.id]);
                         } else {
@@ -448,7 +448,7 @@ export function RoleManagement() {
                       <Checkbox
                         id={permission.id}
                         checked={newRole.permissions.includes(permission.id)}
-                        onCheckedChange={(checked) => handlePermissionChange(permission.id, checked as boolean)}
+                        onCheckedChange={(checked: boolean) => handlePermissionChange(permission.id, checked)}
                       />
                       <div className="flex-1">
                         <Label htmlFor={permission.id} className="font-medium cursor-pointer">

@@ -354,7 +354,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="host"
                   placeholder="localhost"
                   value={sqlData.host}
-                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value } as MySQLFormData))}
                 />
               </div>
               <div className="space-y-2">
@@ -363,7 +363,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="port"
                   placeholder={formData.dataSourceType === 'mysql' ? '3306' : '5432'}
                   value={sqlData.port}
-                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value } as MySQLFormData))}
                 />
               </div>
             </div>
@@ -373,7 +373,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="database"
                 placeholder="database_name"
                 value={sqlData.database}
-                onChange={(e) => setFormData(prev => ({ ...prev, database: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, database: e.target.value } as MySQLFormData))}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -383,7 +383,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="username"
                   placeholder="username"
                   value={sqlData.username}
-                  onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value } as MySQLFormData))}
                 />
               </div>
               <div className="space-y-2">
@@ -393,7 +393,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   type="password"
                   placeholder="password"
                   value={sqlData.password}
-                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value } as MySQLFormData))}
                 />
               </div>
             </div>
@@ -403,7 +403,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="query"
                 placeholder="SELECT * FROM table_name WHERE condition"
                 value={sqlData.query}
-                onChange={(e) => setFormData(prev => ({ ...prev, query: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, query: e.target.value } as MySQLFormData))}
                 rows={3}
               />
             </div>
@@ -420,7 +420,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="uri"
                 placeholder="mongodb://username:password@host:port"
                 value={mongoData.uri}
-                onChange={(e) => setFormData(prev => ({ ...prev, uri: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, uri: e.target.value } as MongoDBFormData))}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -430,7 +430,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="database"
                   placeholder="database_name"
                   value={mongoData.database}
-                  onChange={(e) => setFormData(prev => ({ ...prev, database: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, database: e.target.value } as MongoDBFormData))}
                 />
               </div>
               <div className="space-y-2">
@@ -439,7 +439,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="collection"
                   placeholder="collection_name"
                   value={mongoData.collection}
-                  onChange={(e) => setFormData(prev => ({ ...prev, collection: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, collection: e.target.value } as MongoDBFormData))}
                 />
               </div>
             </div>
@@ -449,7 +449,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="filter"
                 placeholder='{"field": "value"}'
                 value={mongoData.filter}
-                onChange={(e) => setFormData(prev => ({ ...prev, filter: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, filter: e.target.value } as MongoDBFormData))}
                 rows={3}
               />
             </div>
@@ -467,7 +467,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="host"
                   placeholder="localhost"
                   value={redisData.host}
-                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value } as RedisFormData))}
                 />
               </div>
               <div className="space-y-2">
@@ -476,7 +476,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="port"
                   placeholder="6379"
                   value={redisData.port}
-                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value } as RedisFormData))}
                 />
               </div>
             </div>
@@ -487,7 +487,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 type="password"
                 placeholder="password (可选)"
                 value={redisData.password}
-                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value } as RedisFormData))}
               />
             </div>
             <div className="space-y-2">
@@ -496,7 +496,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="keyPattern"
                 placeholder="user:*"
                 value={redisData.keyPattern}
-                onChange={(e) => setFormData(prev => ({ ...prev, keyPattern: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, keyPattern: e.target.value } as RedisFormData))}
               />
             </div>
           </div>
@@ -513,7 +513,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="host"
                   placeholder="localhost"
                   value={esData.host}
-                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value } as ElasticsearchFormData))}
                 />
               </div>
               <div className="space-y-2">
@@ -522,7 +522,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="port"
                   placeholder="9200"
                   value={esData.port}
-                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value } as ElasticsearchFormData))}
                 />
               </div>
             </div>
@@ -532,7 +532,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="index"
                 placeholder="index_name"
                 value={esData.index}
-                onChange={(e) => setFormData(prev => ({ ...prev, index: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, index: e.target.value } as ElasticsearchFormData))}
               />
             </div>
             <div className="space-y-2">
@@ -540,7 +540,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
               <Select
                 value={esData.authType}
                 onValueChange={(value: 'none' | 'basic' | 'apikey') => 
-                  setFormData(prev => ({ ...prev, authType: value }))
+                  setFormData(prev => ({ ...prev, authType: value } as ElasticsearchFormData))
                 }
               >
                 <SelectTrigger>
@@ -561,7 +561,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                     id="username"
                     placeholder="username"
                     value={esData.username || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
+                    onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value } as ElasticsearchFormData))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -571,7 +571,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                     type="password"
                     placeholder="password"
                     value={esData.password || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                    onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value } as ElasticsearchFormData))}
                   />
                 </div>
               </div>
@@ -583,7 +583,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="apiKey"
                   placeholder="your_api_key"
                   value={esData.apiKey || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, apiKey: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, apiKey: e.target.value } as ElasticsearchFormData))}
                 />
               </div>
             )}
@@ -593,7 +593,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="query"
                 placeholder='{"query": {"match_all": {}}}'
                 value={esData.query}
-                onChange={(e) => setFormData(prev => ({ ...prev, query: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, query: e.target.value } as ElasticsearchFormData))}
                 rows={3}
               />
             </div>
@@ -610,7 +610,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="url"
                 placeholder="https://api.example.com/data"
                 value={apiData.url}
-                onChange={(e) => setFormData(prev => ({ ...prev, url: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, url: e.target.value } as APIFormData))}
               />
             </div>
             <div className="space-y-2">
@@ -618,7 +618,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
               <Select
                 value={apiData.method}
                 onValueChange={(value: 'GET' | 'POST' | 'PUT') => 
-                  setFormData(prev => ({ ...prev, method: value }))
+                  setFormData(prev => ({ ...prev, method: value } as APIFormData))
                 }
               >
                 <SelectTrigger>
@@ -637,7 +637,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="headers"
                 placeholder='{"Content-Type": "application/json"}'
                 value={apiData.headers}
-                onChange={(e) => setFormData(prev => ({ ...prev, headers: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, headers: e.target.value } as APIFormData))}
                 rows={3}
               />
             </div>
@@ -647,7 +647,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="params"
                 placeholder='{"param1": "value1"}'
                 value={apiData.params}
-                onChange={(e) => setFormData(prev => ({ ...prev, params: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, params: e.target.value } as APIFormData))}
                 rows={3}
               />
             </div>
@@ -656,7 +656,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
               <Select
                 value={apiData.authType}
                 onValueChange={(value: 'none' | 'basic' | 'bearer' | 'apikey') => 
-                  setFormData(prev => ({ ...prev, authType: value }))
+                  setFormData(prev => ({ ...prev, authType: value } as APIFormData))
                 }
               >
                 <SelectTrigger>
@@ -681,7 +681,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                     'your_api_key'
                   }
                   value={apiData.authValue || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, authValue: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, authValue: e.target.value } as APIFormData))}
                 />
               </div>
             )}
@@ -699,7 +699,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="host"
                   placeholder="ftp.example.com"
                   value={ftpData.host}
-                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value } as FTPFormData))}
                 />
               </div>
               <div className="space-y-2">
@@ -708,7 +708,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="port"
                   placeholder="21"
                   value={ftpData.port}
-                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value } as FTPFormData))}
                 />
               </div>
             </div>
@@ -719,7 +719,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="username"
                   placeholder="username"
                   value={ftpData.username}
-                  onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value } as FTPFormData))}
                 />
               </div>
               <div className="space-y-2">
@@ -729,7 +729,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   type="password"
                   placeholder="password"
                   value={ftpData.password}
-                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value } as FTPFormData))}
                 />
               </div>
             </div>
@@ -739,7 +739,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 id="path"
                 placeholder="/data/files/"
                 value={ftpData.path}
-                onChange={(e) => setFormData(prev => ({ ...prev, path: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, path: e.target.value } as FTPFormData))}
               />
             </div>
             <div className="space-y-2">
@@ -747,7 +747,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
               <Select
                 value={ftpData.fileType}
                 onValueChange={(value: 'csv' | 'json' | 'xml' | 'all') => 
-                  setFormData(prev => ({ ...prev, fileType: value }))
+                  setFormData(prev => ({ ...prev, fileType: value } as FTPFormData))
                 }
               >
                 <SelectTrigger>
@@ -794,7 +794,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="name"
                   placeholder="请输入数据源名称"
                   value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  onChange={(e) => setFormData((prev): FormData => ({ ...prev, name: e.target.value }))}
                 />
               </div>
 
@@ -859,8 +859,8 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 <div className="space-y-2">
                   <Label htmlFor="project">所属项目 *</Label>
                   <Select
-                    value={(formData as any).projectId}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, projectId: value }))}
+                    value={formData.projectId}
+                    onValueChange={(value: string) => setFormData((prev): FormData => ({ ...prev, projectId: value }))}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="请选择所属项目" />
@@ -875,9 +875,9 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                 <div className="space-y-2">
                   <Label htmlFor="permission">权限设置</Label>
                   <Select
-                    value={(formData as any).permission}
+                    value={formData.permission}
                     onValueChange={(value: 'private' | 'team' | 'public') => 
-                      setFormData(prev => ({ ...prev, permission: value }))
+                      setFormData((prev): FormData => ({ ...prev, permission: value }))
                     }
                   >
                     <SelectTrigger>
@@ -917,7 +917,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   id="description"
                   placeholder="请输入数据源的详细描述，包括数据内容、用途等信息"
                   value={formData.description}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  onChange={(e) => setFormData((prev): FormData => ({ ...prev, description: e.target.value }))}
                   rows={3}
                 />
               </div>
@@ -988,7 +988,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                   <Select
                     value={formData.syncFrequency}
                     onValueChange={(value: 'daily' | 'hourly' | 'every10min') => 
-                      setFormData(prev => ({ ...prev, syncFrequency: value }))
+                      setFormData((prev): FormData => ({ ...prev, syncFrequency: value }))
                     }
                   >
                     <SelectTrigger>
@@ -1008,7 +1008,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                       type="checkbox"
                       id="advancedCron"
                       checked={formData.isAdvancedCron}
-                      onChange={(e) => setFormData(prev => ({ ...prev, isAdvancedCron: e.target.checked }))}
+                      onChange={(e) => setFormData((prev): FormData => ({ ...prev, isAdvancedCron: e.target.checked }))}
                     />
                     <Label htmlFor="advancedCron">高级模式（Cron表达式）</Label>
                   </div>
@@ -1017,7 +1017,7 @@ export function DataSubscription({ isOpen, onClose, onSubscriptionSuccess }: Dat
                       <Input
                         placeholder="0 0 * * * (每天午夜)"
                         value={formData.cronExpression || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, cronExpression: e.target.value }))}
+                        onChange={(e) => setFormData((prev): FormData => ({ ...prev, cronExpression: e.target.value }))}
                       />
                       <p className="text-xs text-gray-500">
                         格式：秒 分 时 日 月 周，例如：0 0 12 * * * 表示每天中午12点
