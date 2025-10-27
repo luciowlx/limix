@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { MoreHorizontal, Users, Calendar, Database } from "lucide-react";
+import { Users, Calendar } from "lucide-react";
 import { Button } from "./ui/button";
 
 interface ProjectCardProps {
@@ -49,9 +49,7 @@ export function ProjectCard({ title, description, status, stats, date, members, 
               {status}
             </Badge>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
+          {/* 移除项目卡片右上角的省略号按钮 */}
         </div>
       </CardHeader>
       

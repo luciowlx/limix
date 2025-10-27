@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Clock, User, Database, Brain, AlertCircle, CheckCircle, XCircle, Pause, Play, RotateCcw, Archive, Eye, Settings, Download, Share2, Calendar, Tag, FileText, BarChart3, Activity, Zap, Loader2 } from 'lucide-react';
+import { ArrowLeft, Clock, User, Database, Brain, AlertCircle, CheckCircle, XCircle, Pause, Play, RotateCcw, Archive, Eye, Settings, Download, Share2, Calendar, Tag, FileText, BarChart3, Activity, Zap, Loader2, Filter, Search, TrendingUp, ArrowUpDown, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { VirtualTable } from './ui/virtual-table';
 // Tabs removed in favor of左侧锚点导航
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -37,6 +38,10 @@ import {
   ErrorBar,
 } from 'recharts';
 
+import { toast } from 'sonner';
+import { getAvailableActions, TaskAction } from '../utils/taskActions';
+import { TASK_TYPES } from '../utils/taskTypes';
+
 interface SelectedDatasetEntry {
   id: string;
   name: string;
@@ -48,7 +53,7 @@ interface Task {
   taskName: string;
   taskType: 'classification' | 'regression' | 'clustering' | 'anomaly_detection' | 'forecasting' | 'nlp' | 'computer_vision';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
+  priority: 'low' | 'medium' | 'high';
   datasetName: string;
   datasetVersion: string;
   datasets?: SelectedDatasetEntry[]; // 新增：支持多数据集
@@ -78,6 +83,7 @@ interface TaskDetailFullPageProps {
 const TaskDetailFullPage: React.FC<TaskDetailFullPageProps> = ({ task, onClose, onOpenDataDetail }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean; action: string; taskId: string; taskName: string }>({ isOpen: false, action: '', taskId: '', taskName: '' });
   const [expandedSections, setExpandedSections] = useState<string[]>(['basic-info']);
   const [activeSection, setActiveSection] = useState<string>('meta');
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -149,9 +155,23 @@ output:
   visualization:  # 可视化相关配置
     enable_causal: true  # 是否生成因果可视化`;
 
-  // 数据预览：多数据集切换 & 行数选择
+  // 数据预览：多数据集切换 & 行数选择 + 增强功能（排序 / 筛选 / 分页 / 列控制）
   const [datasetPreviewIndex, setDatasetPreviewIndex] = useState(0);
+  // 兼容旧逻辑：保留 previewRowCount，但分页以 itemsPerPage 为准
   const [previewRowCount, setPreviewRowCount] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [missingOnly, setMissingOnly] = useState(false);
+  const [uniqueOnly, setUniqueOnly] = useState(false);
+  const [uniqueField, setUniqueField] = useState<string | null>(null);
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [columnOrderMode, setColumnOrderMode] = useState<'original' | 'asc' | 'desc'>('original');
+  const [columnManualOrder, setColumnManualOrder] = useState<string[]>([]);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [tableDensity, setTableDensity] = useState<'compact' | 'normal' | 'comfortable'>('normal');
+  const headerRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
 
   // 因果解释交互
   const [selectedCausalNode, setSelectedCausalNode] = useState<string | null>(null);
@@ -573,6 +593,7 @@ output:
     id: string;
     name: string;
     version: string;
+    source?: string; // 数据来源渠道或系统
     size: string; // 例如 "2.5MB"
     fieldCount: number;
     sampleCount: number;
@@ -585,6 +606,7 @@ output:
       id: 'DATA-2025-001',
       name: '生产质量数据集',
       version: 'v3.0',
+      source: '上传',
       size: '2.5MB',
       fieldCount: 15,
       sampleCount: 10000,
@@ -594,6 +616,7 @@ output:
       id: 'DATA-2025-001',
       name: '生产质量数据集',
       version: 'v2.0',
+      source: '上传',
       size: '2.3MB',
       fieldCount: 14,
       sampleCount: 9800,
@@ -603,6 +626,7 @@ output:
       id: 'DATA-2025-001',
       name: '生产质量数据集',
       version: 'v1.0',
+      source: '上传',
       size: '2.1MB',
       fieldCount: 12,
       sampleCount: 9500,
@@ -613,6 +637,7 @@ output:
       id: 'DATA-2025-002',
       name: '客户行为数据集',
       version: 'v2.0',
+      source: '订阅',
       size: '5.2MB',
       fieldCount: 20,
       sampleCount: 25000,
@@ -622,6 +647,7 @@ output:
       id: 'DATA-2025-002',
       name: '客户行为数据集',
       version: 'v1.0',
+      source: '订阅',
       size: '4.8MB',
       fieldCount: 18,
       sampleCount: 23000,
@@ -635,7 +661,12 @@ output:
     return m ? parseFloat(m[1]) : 0;
   };
 
-  const formatSizeMB = (value: number) => `${value.toFixed(1)} MB`;
+  const formatSizeMB = (value: number) => {
+    if (value >= 1024) {
+      return `${(value / 1024).toFixed(1)} GB`;
+    }
+    return `${value.toFixed(1)} MB`;
+  };
 
   const getDatasetStats = (id?: string, version?: string): DatasetStats | undefined => {
     if (!id || !version) return undefined;
@@ -657,12 +688,15 @@ output:
     statsList.forEach((s) => (s.fields || []).forEach((f) => union.add(f)));
     const unionFields = Array.from(union);
     const unionFieldCount = unionFields.length > 0 ? unionFields.length : Math.max(...statsList.map((s) => s.fieldCount));
+    const sources = new Set(statsList.map((s) => s.source || '未设置'));
+    const sourceLabel = sources.size === 0 ? '未设置' : sources.size === 1 ? Array.from(sources)[0] : '多源融合';
 
     return {
       datasetCount,
       totalSamples,
       totalSizeMB,
       unionFieldCount,
+      sourceLabel,
       unionFields,
       statsList,
     };
@@ -737,6 +771,133 @@ output:
     return mockFieldMetaById[id] || mockFieldMetaById.default;
   };
 
+  // 预览表 — 通用工具函数与派生数据
+  const isMissingValue = (val: any) => {
+    if (val === null || val === undefined) return true;
+    if (typeof val === 'number') return Number.isNaN(val);
+    if (typeof val === 'string') {
+      const s = val.trim();
+      return s === '' || s.toLowerCase() === 'n/a';
+    }
+    return false;
+  };
+
+  const rowHasMissing = (row: Record<string, any>) => Object.values(row).some(isMissingValue);
+
+  const getProcessedPreviewRows = () => {
+    const curDs = task.datasets?.[datasetPreviewIndex];
+    const rows = getSampleRowsForDataset(curDs?.id) || [];
+    let data = [...rows];
+
+    // 缺失/唯一筛选
+    if (missingOnly) {
+      data = data.filter((row) => rowHasMissing(row));
+    }
+    if (uniqueOnly && uniqueField) {
+      const counts = new Map<string, number>();
+      rows.forEach((row) => {
+        const raw = row[uniqueField];
+        const val = raw === null || raw === undefined ? '' : typeof raw === 'string' ? raw.trim() : String(raw);
+        if (val !== '' && !(typeof raw === 'number' && Number.isNaN(raw))) {
+          counts.set(val, (counts.get(val) || 0) + 1);
+        }
+      });
+      data = data.filter((row) => {
+        const raw = row[uniqueField];
+        const val = raw === null || raw === undefined ? '' : typeof raw === 'string' ? raw.trim() : String(raw);
+        if (val === '' || (typeof raw === 'number' && Number.isNaN(raw))) return false;
+        return (counts.get(val) || 0) === 1;
+      });
+    }
+
+    // 文本搜索（全列）
+    const term = searchTerm.trim().toLowerCase();
+    if (term) {
+      data = data.filter((row) =>
+        Object.values(row).some((v) => String(v).toLowerCase().includes(term))
+      );
+    }
+
+    // 排序
+    if (sortColumn) {
+      data.sort((a, b) => {
+        const av = a[sortColumn as string];
+        const bv = b[sortColumn as string];
+        const toNum = (x: any) => {
+          if (typeof x === 'number') return x;
+          const n = Number(x);
+          return Number.isNaN(n) ? null : n;
+        };
+        const an = toNum(av);
+        const bn = toNum(bv);
+        let cmp = 0;
+        if (an !== null && bn !== null) {
+          cmp = an - bn;
+        } else {
+          cmp = String(av).localeCompare(String(bv));
+        }
+        return sortOrder === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    return data;
+  };
+
+  const getColumnOrder = () => {
+    const curDs = task.datasets?.[datasetPreviewIndex];
+    const rows = getSampleRowsForDataset(curDs?.id) || [];
+    const cols = rows[0] ? Object.keys(rows[0]) : [];
+    // 优先使用手动拖拽顺序
+    if (columnManualOrder && columnManualOrder.length > 0) {
+      const baseSet = new Set(cols);
+      const manual = columnManualOrder.filter((c) => baseSet.has(c));
+      const rest = cols.filter((c) => !manual.includes(c));
+      return [...manual, ...rest];
+    }
+    if (columnOrderMode === 'asc') return [...cols].sort((a, b) => a.localeCompare(b));
+    if (columnOrderMode === 'desc') return [...cols].sort((a, b) => b.localeCompare(a));
+    return cols;
+  };
+
+  // 列宽拖拽与列顺序拖拽
+  const startResize = (col: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = (e as any).clientX as number;
+    const startWidth = columnWidths[col] ?? headerRefs.current[col]?.getBoundingClientRect().width ?? 100;
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const newW = Math.max(60, Math.round((startWidth as number) + delta));
+      setColumnWidths((prev) => ({ ...prev, [col]: newW }));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const onHeaderDragStart = (col: string) => (e: React.DragEvent) => {
+    e.dataTransfer.setData('text/col', col);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const onHeaderDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+  const onHeaderDrop = (targetCol: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const sourceCol = e.dataTransfer.getData('text/col');
+    if (!sourceCol || sourceCol === targetCol) return;
+    const current = getColumnOrder();
+    const next = current.filter((c) => c !== sourceCol);
+    const idx = next.indexOf(targetCol);
+    next.splice(idx >= 0 ? idx : next.length, 0, sourceCol);
+    setColumnManualOrder(next);
+    setColumnOrderMode('original');
+  };
+
   const getStatusConfig = (status: Task['status']) => {
     const configs = {
       pending: { label: '等待中', color: 'bg-gray-100 text-gray-800', icon: Clock },
@@ -754,8 +915,7 @@ output:
       low: { label: '低', color: 'bg-gray-100 text-gray-800' },
       medium: { label: '中', color: 'bg-blue-100 text-blue-800' },
       high: { label: '高', color: 'bg-orange-100 text-orange-800' },
-      urgent: { label: '紧急', color: 'bg-red-100 text-red-800' },
-    };
+    } as const;
     return configs[priority];
   };
 
@@ -919,6 +1079,59 @@ output:
     }, 300);
   };
 
+  // 与任务列表统一的操作执行与确认逻辑
+  const performNetworkAction = async (action: string, taskId: string) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const failRate = 0.15;
+    if (Math.random() < failRate) {
+      throw new Error('网络请求失败，请稍后重试');
+    }
+  };
+
+  const executeTaskAction = async (action: string, taskId: string) => {
+    setLoadingAction(`${taskId}:${action}`);
+    try {
+      await performNetworkAction(action, taskId);
+      if (action === 'start') {
+        toast.success('任务已开始');
+      } else if (action === 'stop') {
+        toast.success('任务已停止');
+      } else if (action === 'retry') {
+        toast.success('任务已进入排队');
+      } else if (action === 'archive') {
+        toast.success('任务已归档');
+      } else if (action === 'delete') {
+        toast.success('任务已删除');
+      } else if (action === 'copy') {
+        toast.success('已创建任务副本');
+      } else if (action === 'export') {
+        // 细化到“导出参数 JSON”，保持与列表页的导出示例一致
+        handleExportParamsJson();
+        toast.success('已导出任务详情');
+      } else {
+        toast.success('操作完成');
+      }
+    } catch (err: any) {
+      const msg = err?.message || '操作失败';
+      toast.error(msg);
+    } finally {
+      setLoadingAction(null);
+      setConfirmDialog({ isOpen: false, action: '', taskId: '', taskName: '' });
+    }
+  };
+
+  const handleCancelConfirm = () => {
+    setConfirmDialog({ isOpen: false, action: '', taskId: '', taskName: '' });
+  };
+
+  const handleTaskAction = (action: string, taskId: string) => {
+    if (['start', 'stop', 'archive', 'retry', 'delete'].includes(action.trim())) {
+      setConfirmDialog({ isOpen: true, action: action.trim(), taskId, taskName: task.taskName });
+    } else {
+      executeTaskAction(action.trim(), taskId);
+    }
+  };
+
   const renderOverviewTab = () => (
     <div className="space-y-6">
       {/* 基本信息 */}
@@ -1057,79 +1270,16 @@ output:
           </AccordionContent>
         </AccordionItem>
 
-        {/* 数据集和模型信息 */}
-        <AccordionItem value="dataset-model">
-          <AccordionTrigger className="text-lg font-semibold">
-            <div className="flex items-center gap-2">
-              <Database className="h-5 w-5" />
-              数据集和模型
-            </div>
-          </AccordionTrigger>
-          <AccordionContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="transition-all duration-200 hover:shadow-md border-gray-200">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Brain className="h-5 w-5" />
-                    模型信息
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <p className="text-sm text-gray-600">模型名称</p>
-                    <p className="font-medium">{task.modelName}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">模型类型</p>
-                    <p className="font-medium">{getTaskTypeLabel(task.taskType)}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </AccordionContent>
-        </AccordionItem>
+        {/* 数据集和模型信息（已移除） */}
 
-        {/* 执行进度 */}
-        {task.status === 'running' && task.progress !== undefined && (
-          <AccordionItem value="progress">
-            <AccordionTrigger className="text-lg font-semibold">
-              <div className="flex items-center gap-2">
-                <Activity className="h-5 w-5" />
-                执行进度
-              </div>
-            </AccordionTrigger>
-            <AccordionContent>
-              <Card className="transition-all duration-200 hover:shadow-md border-gray-200">
-                <CardContent className="pt-6">
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium">总体进度</span>
-                      <span className="text-sm text-gray-600">{task.progress}%</span>
-                    </div>
-                    <Progress value={task.progress} className="h-3" />
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-gray-600">预计时间</p>
-                        <p className="font-medium">{task.estimatedTime || '计算中...'}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-600">已用时间</p>
-                        <p className="font-medium">{task.actualTime || '计算中...'}</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </AccordionContent>
-          </AccordionItem>
-        )}
+        {/* 执行进度（已移除） */}
       </Accordion>
     </div>
   );
 
   const renderMetricsTab = () => (
     <div className="space-y-6">
-      {task.taskType === 'classification' ? (
+      {task.taskType === TASK_TYPES.classification ? (
         <>
           <Card className="transition-all duration-200 hover:shadow-md border-gray-200">
             <CardHeader className="flex flex-row items-center justify-between">
@@ -1366,7 +1516,7 @@ output:
             </Card>
           </div>
         </>
-      ) : task.taskType === 'forecasting' ? (
+      ) : task.taskType === TASK_TYPES.forecasting ? (
         <>
           {/* 指标报表 */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -1604,7 +1754,7 @@ output:
             </CardContent>
           </Card>
         </>
-      ) : task.taskType === 'regression' ? (
+      ) : task.taskType === TASK_TYPES.regression ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
@@ -1939,113 +2089,52 @@ output:
         </div>
         
         <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="text-blue-600 border-blue-200 hover:bg-blue-50">
-                <Download className="h-4 w-4 mr-2" />
-                导出
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleExportPDF}>导出 PDF</DropdownMenuItem>
-              <DropdownMenuItem onClick={handleExportHTML}>导出 HTML</DropdownMenuItem>
-              <DropdownMenuItem onClick={handleExportParamsJson}>导出参数 JSON</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {task.status === 'running' && (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="text-orange-600 border-orange-200 hover:bg-orange-50 transition-all duration-200"
-              disabled={loadingAction === 'pause'}
-              onClick={() => {
-                setLoadingAction('pause');
-                setTimeout(() => setLoadingAction(null), 2000);
-              }}
-            >
-              {loadingAction === 'pause' ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Pause className="h-4 w-4 mr-2" />
-              )}
-              暂停任务
-            </Button>
-          )}
-          {task.status === 'failed' && (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="text-blue-600 border-blue-200 hover:bg-blue-50 transition-all duration-200"
-              disabled={loadingAction === 'restart'}
-              onClick={() => {
-                setLoadingAction('restart');
-                setTimeout(() => setLoadingAction(null), 2000);
-              }}
-            >
-              {loadingAction === 'restart' ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <RotateCcw className="h-4 w-4 mr-2" />
-              )}
-              重新运行
-            </Button>
-          )}
-          {task.status === 'completed' && (
-            <>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="text-green-600 border-green-200 hover:bg-green-50 transition-all duration-200"
-                disabled={loadingAction === 'export'}
-                onClick={() => {
-                  setLoadingAction('export');
-                  setTimeout(() => setLoadingAction(null), 2000);
-                }}
+          {/* 使用共享映射动态呈现操作按钮（过滤掉“详情”） */}
+          {getAvailableActions(task).filter((a: TaskAction) => a.key !== 'view' && a.key !== 'edit').map((action: TaskAction) => {
+            const isLoading = loadingAction === `${task.id}:${action.key}`;
+            const classMap: Record<string, string> = {
+              start: 'text-green-600 border-green-200 hover:bg-green-50',
+              stop: 'text-orange-600 border-orange-200 hover:bg-orange-50',
+              retry: 'text-blue-600 border-blue-200 hover:bg-blue-50',
+              export: 'text-blue-600 border-blue-200 hover:bg-blue-50',
+              copy: 'text-purple-600 border-purple-200 hover:bg-purple-50',
+              archive: 'text-gray-600 border-gray-200 hover:bg-gray-50',
+              delete: 'text-red-600 border-red-200 hover:bg-red-50',
+              edit: 'text-gray-600 border-gray-200 hover:bg-gray-50',
+            };
+            if (action.key === 'export') {
+              return (
+                <DropdownMenu key="export">
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className={classMap['export']}>
+                      {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                      导出
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={handleExportPDF}>导出 PDF</DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleExportHTML}>导出 HTML</DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleExportParamsJson}>导出参数 JSON</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            }
+            const Icon = action.icon;
+            const labelOverride = action.key === 'copy' ? '基于此重新训练' : action.label;
+            return (
+              <Button
+                key={action.key}
+                variant="outline"
+                size="sm"
+                className={`${classMap[action.key] ?? 'text-gray-600 border-gray-200 hover:bg-gray-50'} transition-all duration-200`}
+                disabled={isLoading}
+                onClick={() => handleTaskAction(action.key as any, task.id)}
               >
-                {loadingAction === 'export' ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4 mr-2" />
-                )}
-                导出结果
+                {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Icon className="h-4 w-4 mr-2" />}
+                {labelOverride}
               </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="text-purple-600 border-purple-200 hover:bg-purple-50 transition-all duration-200"
-                disabled={loadingAction === 'retrain'}
-                onClick={() => {
-                  setLoadingAction('retrain');
-                  setTimeout(() => setLoadingAction(null), 2000);
-                }}
-              >
-                {loadingAction === 'retrain' ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                )}
-                基于此重新训练
-              </Button>
-            </>
-          )}
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="text-gray-600 border-gray-200 hover:bg-gray-50 transition-all duration-200"
-            disabled={loadingAction === 'archive'}
-            onClick={() => {
-              setLoadingAction('archive');
-              setTimeout(() => setLoadingAction(null), 2000);
-            }}
-          >
-            {loadingAction === 'archive' ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Archive className="h-4 w-4 mr-2" />
-            )}
-            归档任务
-          </Button>
-          
+            );
+          })}
         </div>
       </div>
 
@@ -2093,28 +2182,44 @@ output:
                         <p className="text-sm text-gray-600">已关联数据集（多选）</p>
                         <div className="flex flex-wrap gap-2 mt-2">
                           {task.datasets.map((ds) => (
-                            <Badge key={ds.id} variant="secondary" className="flex items-center space-x-2">
+                            <Badge key={ds.id} variant="secondary" className="flex items-center gap-2">
                               <span>{ds.name}</span>
-                              <span className="text-xs text-gray-500">{ds.version}</span>
+                              <span className="text-xs text-gray-500">{ds.id}{ds.version ? ` · ${ds.version}` : ''}</span>
                             </Badge>
                           ))}
                         </div>
                       </div>
                     ) : (
-                      <>
-                        <div>
-                          <p className="text-sm text-gray-600">数据集名称</p>
-                          <p className="font-medium">{task.datasetName}</p>
+                      <div>
+                        <p className="text-sm text-gray-600">已关联数据集</p>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <Badge variant="secondary" className="flex items-center gap-2">
+                            <span>{task.datasetName || '未设置'}</span>
+                            <span className="text-xs text-gray-500">{(task as any).datasetId || '未设置'}{task.datasetVersion ? ` · ${task.datasetVersion}` : ''}</span>
+                          </Badge>
                         </div>
-                        <div>
-                          <p className="text-sm text-gray-600">数据集ID + 版本号</p>
-                          <p className="font-medium">{task.datasetVersion}</p>
-                        </div>
-                      </>
+                      </div>
                     )}
-                    <div>
-                      <p className="text-sm text-gray-600">来源</p>
-                      <p className="font-medium">上传</p>
+
+                    <div className="mt-2 space-y-3">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="text-sm text-gray-600">来源</div>
+                          <div className="text-base font-medium">{aggregatedStats?.sourceLabel ?? '未设置'}</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-gray-600">样本总数</div>
+                          <div className="text-base font-medium">{aggregatedStats ? aggregatedStats.totalSamples.toLocaleString() : '未设置'}</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-gray-600">字段并集数量</div>
+                          <div className="text-base font-medium">{aggregatedStats ? aggregatedStats.unionFieldCount.toLocaleString() : '未设置'}</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-gray-600">合集大小</div>
+                          <div className="text-base font-medium">{aggregatedStats ? formatSizeMB(aggregatedStats.totalSizeMB) : '未设置'}</div>
+                        </div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -2122,11 +2227,11 @@ output:
                   <CardHeader className="flex-row items-center justify-between">
                     <div>
                       <CardTitle>数据预览</CardTitle>
-                      <CardDescription>支持多数据集切换，字段名 + 示例值</CardDescription>
+                      <CardDescription>参考数据管理-数据详情样式，支持排序/筛选/分页/列控制</CardDescription>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <div className="w-52">
-                        <Select value={String(datasetPreviewIndex)} onValueChange={(v: string) => setDatasetPreviewIndex(Number(v))}>
+                        <Select value={String(datasetPreviewIndex)} onValueChange={(v: string) => { setDatasetPreviewIndex(Number(v)); setCurrentPage(1); }}>
                           <SelectTrigger>
                             <SelectValue placeholder="选择数据集" />
                           </SelectTrigger>
@@ -2139,139 +2244,93 @@ output:
                           </SelectContent>
                         </Select>
                       </div>
+
+                      <div className="relative">
+                        <Search className="h-4 w-4 absolute left-2 top-2 text-gray-400" />
+                        <Input className="pl-8 w-40" value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} placeholder="搜索行内容" />
+                      </div>
+
+                      <Button variant="outline" size="sm" onClick={() => setMissingOnly((prev) => !prev)} className={missingOnly ? "bg-orange-50 border-orange-500 text-orange-600" : ""}>
+                        <Filter className="h-4 w-4 mr-1" />缺失值
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setUniqueOnly((prev) => !prev)} className={uniqueOnly ? "bg-indigo-50 border-indigo-500 text-indigo-600" : ""}>
+                        <TrendingUp className="h-4 w-4 mr-1" />唯一值
+                      </Button>
+                      <Select value={uniqueField || ''} onValueChange={(v: string) => { setUniqueField(v || null); setCurrentPage(1); }}>
+                        <SelectTrigger className="w-40">
+                          <SelectValue placeholder="选择字段" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getColumnOrder().map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
+                        </SelectContent>
+                      </Select>
+
+                      {/* 每页分页已移除，使用虚拟滚动 */}
+
                       <div className="w-36">
-                        <Select value={String(previewRowCount)} onValueChange={(v: string) => setPreviewRowCount(Number(v))}>
+                        <Select value={columnOrderMode} onValueChange={(v: any) => setColumnOrderMode(v)}>
                           <SelectTrigger>
-                            <SelectValue placeholder="行数" />
+                            <SelectValue placeholder="列排序" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="10">前 10 行</SelectItem>
-                            <SelectItem value="20">前 20 行</SelectItem>
-                            <SelectItem value="50">前 50 行</SelectItem>
+                            <SelectItem value="original">原顺序</SelectItem>
+                            <SelectItem value="asc">A-Z</SelectItem>
+                            <SelectItem value="desc">Z-A</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="hover:bg-gray-50"
-                        onClick={() => {
-                          const curDs = task.datasets?.[datasetPreviewIndex];
-                          onOpenDataDetail?.({
-                            id: curDs ? curDs.id : task.datasetVersion,
-                            name: curDs ? curDs.name : task.datasetName,
-                            description: '任务关联数据集',
-                            size: '未知',
-                            fieldCount: (getFieldMetaForDataset(curDs?.id) || []).length,
-                            sampleCount: (getSampleRowsForDataset(curDs?.id) || []).length,
-                            source: 'upload',
-                          });
-                        }}
-                      >
-                        数据详情
-                      </Button>
+
+                      <div className="w-36">
+                        <Select value={tableDensity} onValueChange={(v: any) => setTableDensity(v)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="密度" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="compact">紧凑</SelectItem>
+                            <SelectItem value="normal">适中</SelectItem>
+                            <SelectItem value="comfortable">宽松</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* 数据详情按钮已移除 */}
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="overflow-auto">
-                      {(() => {
-                        const curDs = task.datasets?.[datasetPreviewIndex];
-                        const rows = getSampleRowsForDataset(curDs?.id);
-                        const limited = rows.slice(0, Math.min(previewRowCount, rows.length));
-                        const columns = rows[0] ? Object.keys(rows[0]) : [];
-                        return (
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                {columns.map((col) => (
-                                  <TableHead key={col}>{col}</TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {limited.map((row, idx) => (
-                                <TableRow key={idx}>
-                                  {Object.entries(row).map(([k, v]) => (
-                                    <TableCell key={k}>{String(v)}</TableCell>
-                                  ))}
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        );
-                      })()}
-                    </div>
+                    {(() => {
+                      const processed = getProcessedPreviewRows();
+                      const cols = getColumnOrder();
+                      const columnsDef = cols.map((c) => ({
+                        key: c,
+                        label: c,
+                        width: columnWidths[c],
+                        sortable: true,
+                        render: (value: any) => (typeof value === 'number' && Number.isNaN(value) ? 'NaN' : String(value)),
+                      }));
+                      const tableHeight = tableDensity === 'compact' ? 300 : tableDensity === 'comfortable' ? 460 : 380;
+                      return (
+                        <div>
+                          <VirtualTable
+                            data={processed as any[]}
+                            columns={columnsDef as any}
+                            height={tableHeight}
+                            density={tableDensity}
+                            defaultColumnOrder={(columnManualOrder && columnManualOrder.length) ? columnManualOrder : cols}
+                            defaultColumnWidths={columnWidths}
+                            onColumnOrderChange={(order) => { setColumnManualOrder(order); setColumnOrderMode('original'); }}
+                            onColumnWidthsChange={(w) => setColumnWidths(w)}
+                            sortState={{ column: sortColumn || undefined, order: sortOrder }}
+                            onSortChange={(column, order) => { setSortColumn(column); setSortOrder(order); }}
+                            onReset={() => { setColumnManualOrder([]); setColumnWidths({}); setColumnOrderMode('original'); }}
+                          />
+                        </div>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               </div>
-              {/* 多数据集聚合统计：仅在选择了多个数据集时显示 */}
-              {aggregatedStats && task.datasets && task.datasets.length > 1 && (
-                <Card className="transition-all duration-200 hover:shadow-md border-gray-200 mt-6">
-                  <CardHeader>
-                    <CardTitle>多数据集聚合统计</CardTitle>
-                    <CardDescription>展示参与训练的多个数据集的合并统计信息</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div>
-                        <div className="text-sm text-gray-600">数据集数量</div>
-                        <div className="text-lg font-medium">{aggregatedStats.datasetCount}</div>
-                      </div>
-                      <div>
-                        <div className="text-sm text-gray-600">样本总数</div>
-                        <div className="text-lg font-medium">{aggregatedStats.totalSamples.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="text-sm text-gray-600">字段并集数量</div>
-                        <div className="text-lg font-medium">{aggregatedStats.unionFieldCount}</div>
-                      </div>
-                      <div>
-                        <div className="text-sm text-gray-600">合计大小</div>
-                        <div className="text-lg font-medium">{formatSizeMB(aggregatedStats.totalSizeMB)}</div>
-                      </div>
-                    </div>
-                    <div className="mt-3 text-xs text-gray-500">提示：字段并集基于注册表中的已知字段集合估算，实际以数据处理结果为准。</div>
-                    <div className="mt-4">
-                      <div className="text-sm font-medium text-gray-700 mb-2">参与数据集</div>
-                      <div className="flex flex-wrap gap-2">
-                        {aggregatedStats.statsList.map((s) => (
-                          <Badge key={`${s.id}@${s.version}`} variant="outline" className="flex items-center gap-2">
-                            <span>{s.name}</span>
-                            <span className="text-xs text-gray-500">{s.version}</span>
-                            <span className="text-xs text-gray-400">样本 {s.sampleCount.toLocaleString()} • 字段 {s.fieldCount} • {s.size}</span>
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+              {/* 已合并至上方数据预览右侧摘要区，原聚合统计卡片移除 */}
 
-              <Card className="transition-all duration-200 hover:shadow-md border-gray-200 mt-6">
-                <CardHeader>
-                  <CardTitle>字段级元信息</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>字段名</TableHead>
-                        <TableHead>数据类型</TableHead>
-                        <TableHead>缺失率</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {mockDatasetFields.map((f) => (
-                        <TableRow key={f.name}>
-                          <TableCell className="font-medium">{f.name}</TableCell>
-                          <TableCell>{f.type}</TableCell>
-                          <TableCell>{f.missing}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
             </section>
 
             {/* 模型信息 */}
@@ -2495,6 +2554,42 @@ output:
               <h2 className="text-lg font-semibold mb-4">任务产物</h2>
               {renderArtifactsTab()}
             </section>
+
+            {/* 操作确认弹窗 */}
+            <Dialog open={confirmDialog.isOpen} onOpenChange={() => handleCancelConfirm()}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>确认操作</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="text-sm text-gray-600">
+                    {confirmDialog.action === 'start' && '是否开始任务？'}
+                    {confirmDialog.action === 'stop' && '是否停止任务？'}
+                    {confirmDialog.action === 'retry' && '是否重试该任务？'}
+                    {confirmDialog.action === 'archive' && '是否归档该任务？归档后不可编辑，仅可查看。'}
+                    {confirmDialog.action === 'delete' && '是否删除该任务？删除后不可恢复。'}
+                  </div>
+                  <p className="font-medium">{confirmDialog.taskName}</p>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={handleCancelConfirm}>取消</Button>
+                    <Button
+                      onClick={() => executeTaskAction(confirmDialog.action, confirmDialog.taskId)}
+                      disabled={loadingAction === `${confirmDialog.taskId}:${confirmDialog.action}`}
+                      className={`${confirmDialog.action === 'start' ? 'bg-green-600 hover:bg-green-700' : confirmDialog.action === 'stop' || confirmDialog.action === 'delete' ? 'bg-red-600 hover:bg-red-700' : confirmDialog.action === 'retry' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-600 hover:bg-gray-700'}`}
+                    >
+                      {loadingAction === `${confirmDialog.taskId}:${confirmDialog.action}` ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : null}
+                      {confirmDialog.action === 'start' ? '开始任务' :
+                       confirmDialog.action === 'stop' ? '停止任务' :
+                       confirmDialog.action === 'retry' ? '重试任务' :
+                       confirmDialog.action === 'archive' ? '归档任务' :
+                       confirmDialog.action === 'delete' ? '删除任务' : '确认'}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </div>

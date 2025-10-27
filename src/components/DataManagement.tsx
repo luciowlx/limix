@@ -5,11 +5,16 @@ import { Button } from "./ui/button";
 import { Progress } from "./ui/progress";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import { VirtualTable } from "./ui/virtual-table";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "./ui/drawer";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
-import { Checkbox } from "./ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Calendar } from "./ui/calendar";
+import type { DateRange } from "react-day-picker";
+import { formatYYYYMMDD, parseDateFlexible, toDateOnly, toEndOfDay, isDateWithinRange } from "../utils/date";
+
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
@@ -38,11 +43,10 @@ import {
   History,
   Filter,
   Search,
-  ChevronDown,
   MoreHorizontal,
   Archive,
-  RefreshCw,
-  Plus
+  Plus,
+  Calendar as CalendarIcon
 } from "lucide-react";
 import { toast } from "sonner";
 import VersionHistory from "./VersionHistory";
@@ -127,7 +131,7 @@ export function DataManagement({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [sortBy, setSortBy] = useState('updateTime');
+  const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   
   // 分页状态
@@ -140,6 +144,9 @@ export function DataManagement({
   
   // 删除确认状态
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'single' | 'batch', ids: number[] }>({ type: 'single', ids: [] });
+  // 取消上传确认状态
+  const [isCancelUploadConfirmOpen, setIsCancelUploadConfirmOpen] = useState(false);
+  const [cancelUploadTargetId, setCancelUploadTargetId] = useState<number | null>(null);
 
   // 列设置状态
   const [columnSettings, setColumnSettings] = useState<ColumnSettings>({
@@ -164,8 +171,8 @@ export function DataManagement({
     sizeRange: [0, 1000] as [number, number],
     rowsRange: [0, 1000000] as [number, number],
     completenessRange: [0, 100] as [number, number],
-    dateRange: null as { from: Date; to: Date } | null,
-    categories: [] as string[],
+    dateRange: null as DateRange | null,
+    tagQuery: '' as string,
     formats: [] as string[]
   });
 
@@ -198,9 +205,11 @@ export function DataManagement({
     name: string;
     dataset: string;
     type: string;
-    status: 'completed' | 'running' | 'pending';
+    status: 'success' | 'running' | 'pending' | 'failed';
     operations: string[];
     startTime?: string | null;
+    createdAt?: string;
+    completedAt?: string | null;
     progress?: number; // 仅在进行中展示进度
   }
 
@@ -210,9 +219,11 @@ export function DataManagement({
       name: '传感器数据预处理',
       dataset: '生产线传感器数据集',
       type: '数据清洗',
-      status: 'completed',
+      status: 'success',
       operations: ['异常值处理', '缺失值处理', '数据标准化'],
-      startTime: '2024-01-15 09:00:00'
+      startTime: '2024-01-15T09:00:00.000Z',
+      createdAt: '2024-01-14T10:00:00.000Z',
+      completedAt: '2024-01-15T10:30:00.000Z'
     },
     {
       id: 2,
@@ -221,7 +232,8 @@ export function DataManagement({
       type: '特征工程',
       status: 'running',
       operations: ['特征选择', '特征转换', '特征组合'],
-      startTime: '2024-01-15 14:00:00',
+      startTime: '2024-01-15T14:00:00.000Z',
+      createdAt: '2024-01-15T12:00:00.000Z',
       progress: 65
     },
     {
@@ -231,20 +243,51 @@ export function DataManagement({
       type: '质量评估',
       status: 'pending',
       operations: ['完整性检测', '一致性校验', '准确性评估'],
-      startTime: null
+      startTime: null,
+      createdAt: '2024-01-16T08:20:00.000Z'
+    },
+    {
+      id: 4,
+      name: '设备日志预处理',
+      dataset: '生产设备日志集',
+      type: '数据清洗',
+      status: 'failed',
+      operations: ['异常值处理', '日志解析'],
+      startTime: '2024-01-13T09:30:00.000Z',
+      createdAt: '2024-01-13T09:00:00.000Z',
+      completedAt: null
     }
   ]);
 
+  // 任务筛选状态与派生数据
+  const [taskFilters, setTaskFilters] = useState<{ status: 'all' | 'success' | 'running' | 'pending' | 'failed'; dateRange: DateRange | null; datasetQuery: string }>({
+    status: 'all',
+    dateRange: null,
+    datasetQuery: ''
+  });
+
+  const filteredPreprocessingTasks = preprocessingTasks.filter(t => {
+    const statusOk = taskFilters.status === 'all' || t.status === taskFilters.status;
+    const q = taskFilters.datasetQuery.trim().toLowerCase();
+    // 改为按任务ID或数据集搜索
+    const queryOk = !q || t.dataset.toLowerCase().includes(q) || String(t.id).toLowerCase().includes(q);
+    const dateOk = !taskFilters.dateRange || isDateWithinRange(t.createdAt ?? t.startTime ?? '', taskFilters.dateRange);
+    return statusOk && queryOk && dateOk;
+  });
+
+  // 重新上传目标ID：用于在上传成功后将对应数据集状态更新为成功
+  const [reuploadTargetId, setReuploadTargetId] = useState<number | null>(null);
+
   const handleStartTask = (id: number) => {
     setPreprocessingTasks(prev => prev.map(t => (
-      t.id === id ? { ...t, status: 'running', progress: 0, startTime: new Date().toLocaleString() } : t
+      t.id === id ? { ...t, status: 'running', progress: 0, startTime: new Date().toISOString(), completedAt: null } : t
     )));
     toast.success('任务已开始执行');
   };
 
   const handleStopTask = (id: number) => {
     setPreprocessingTasks(prev => prev.map(t => (
-      t.id === id ? { ...t, status: 'pending', progress: undefined } : t
+      t.id === id ? { ...t, status: 'failed', progress: undefined, completedAt: new Date().toISOString() } : t
     )));
     toast.success('任务已停止');
   };
@@ -252,8 +295,44 @@ export function DataManagement({
   const handleViewTask = (id: number) => {
     const task = preprocessingTasks.find(t => t.id === id);
     if (task) {
-      toast.info(`查看任务详情：${task.name}`);
+      // 展示任务ID而非任务名称
+      toast.info(`查看任务详情：任务ID ${task.id}`);
       // 这里可扩展：打开全屏详情页或任务详情弹窗
+    }
+  };
+
+  const handleRetryTask = (id: number) => {
+    setPreprocessingTasks(prev => prev.map(t => (
+      t.id === id ? { ...t, status: 'running', progress: 0, startTime: new Date().toISOString(), completedAt: null } : t
+    )));
+    toast.success('已重新开始处理任务');
+  };
+
+  const handleCopyRules = (id: number) => {
+    const task = preprocessingTasks.find(t => t.id === id);
+    if (!task) return;
+    toast.success('已复制预处理规则为新模板');
+  };
+
+  const handleEditTask = (id: number) => {
+    const task = preprocessingTasks.find(t => t.id === id);
+    if (!task) return;
+    const ds = datasets.find(d => d.title === task.dataset);
+    setSelectedDatasetForPreprocessing(ds ?? null);
+    setIsDataPreprocessingOpen(true);
+  };
+
+  const handleDeleteTask = (id: number) => {
+    setPreprocessingTasks(prev => prev.filter(t => t.id !== id));
+    toast.success('已删除任务');
+  };
+
+  const handleDatasetClick = (datasetName: string) => {
+    const ds = datasets.find(d => d.title === datasetName);
+    if (ds) {
+      handleViewDataDetail(ds.id);
+    } else {
+      toast.info(`数据集未找到：${datasetName}`);
     }
   };
 
@@ -350,7 +429,7 @@ export function DataManagement({
       icon: Upload
     },
     {
-      label: "处理中",
+      label: "导入中",
       value: "8",
       icon: Clock
     },
@@ -366,10 +445,7 @@ export function DataManagement({
     .filter(dataset => {
       const matchesSearch = dataset.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            dataset.description.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesStatus = !statusFilter || 
-                           (statusFilter === 'active' && dataset.status === 'success') ||
-                           (statusFilter === 'processing' && dataset.status === 'processing') ||
-                           (statusFilter === 'error' && dataset.status === 'failed');
+      const matchesStatus = !statusFilter || dataset.status === statusFilter;
       const matchesSource = !sourceFilter || 
                            (sourceFilter === 'upload' && dataset.source.includes('上传')) ||
                            (sourceFilter === 'api' && dataset.source.includes('API')) ||
@@ -378,12 +454,31 @@ export function DataManagement({
       // 高级筛选
       const sizeInMB = parseFloat(dataset.size.replace('MB', ''));
       const rowsCount = parseInt(dataset.rows.replace(/,/g, ''));
+
+      // 日期范围筛选（基于 updateTime）：统一为“日期”维度比较，避免解析偏差
+      const updateDateRaw = parseDateFlexible(dataset.updateTime);
+      const updateDate = updateDateRaw ? toDateOnly(updateDateRaw) : null;
+      const start = advancedFilters.dateRange?.from ? toDateOnly(new Date(advancedFilters.dateRange.from)) : null;
+      const end = advancedFilters.dateRange?.to ? toEndOfDay(new Date(advancedFilters.dateRange.to)) : null;
+      let matchesDateRange = true;
+      if ((start || end) && !updateDate) {
+        matchesDateRange = false; // 无法解析更新时间，但设置了日期范围，则视为不匹配
+      } else {
+        if (start && updateDate) {
+          matchesDateRange = matchesDateRange && updateDate >= start;
+        }
+        if (end && updateDate) {
+          matchesDateRange = matchesDateRange && updateDate <= end;
+        }
+      }
+
       const matchesAdvanced = 
         sizeInMB >= advancedFilters.sizeRange[0] && sizeInMB <= advancedFilters.sizeRange[1] &&
         rowsCount >= advancedFilters.rowsRange[0] && rowsCount <= advancedFilters.rowsRange[1] &&
         dataset.completeness >= advancedFilters.completenessRange[0] && dataset.completeness <= advancedFilters.completenessRange[1] &&
-        (advancedFilters.categories.length === 0 || dataset.tags.some(t => advancedFilters.categories.includes(t.name))) &&
-        (advancedFilters.formats.length === 0 || advancedFilters.formats.includes(dataset.format));
+        (!advancedFilters.tagQuery || dataset.tags.some(t => t.name.toLowerCase().includes(advancedFilters.tagQuery.toLowerCase()))) &&
+        (advancedFilters.formats.length === 0 || advancedFilters.formats.includes(dataset.format)) &&
+        matchesDateRange;
 
       return matchesSearch && matchesStatus && matchesSource && matchesAdvanced;
     })
@@ -426,7 +521,10 @@ export function DataManagement({
     if (selectAll) {
       setSelectedDatasets([]);
     } else {
-      setSelectedDatasets(paginatedDatasets.map(d => d.id));
+      const ids = viewMode === 'list'
+        ? filteredAndSortedDatasets.map(d => d.id)
+        : paginatedDatasets.map(d => d.id);
+      setSelectedDatasets(ids);
     }
     setSelectAll(!selectAll);
   };
@@ -472,7 +570,7 @@ export function DataManagement({
     setDatasets(prevDatasets => 
       prevDatasets.map(dataset => 
         dataset.id === editingDataset.id 
-          ? { ...editingDataset, updateTime: new Date().toLocaleString() }
+          ? { ...editingDataset, updateTime: new Date().toISOString() }
           : dataset
       )
     );
@@ -502,7 +600,7 @@ export function DataManagement({
     const newDataset = {
       ...copyingDataset,
       id: maxId + 1,
-      updateTime: new Date().toLocaleString(),
+      updateTime: new Date().toISOString(),
       status: 'success' as const
     };
 
@@ -592,17 +690,47 @@ export function DataManagement({
     setSearchTerm('');
     setStatusFilter('');
     setSourceFilter('');
-    setSortBy('updateTime');
+    setSortBy('name');
     setSortOrder('desc');
     setAdvancedFilters({
       sizeRange: [0, 1000],
       rowsRange: [0, 1000000],
       completenessRange: [0, 100],
       dateRange: null,
-      categories: [],
+      tagQuery: '',
       formats: []
     });
     toast.success("筛选条件已重置");
+  };
+
+  // 新增：按状态的操作函数
+  const handleCancelUpload = (id: number) => {
+    // 打开二次确认弹窗，避免误触
+    setCancelUploadTargetId(id);
+    setIsCancelUploadConfirmOpen(true);
+  };
+
+  const handleConfirmCancelUpload = () => {
+    if (cancelUploadTargetId === null) return;
+    const dataset = datasets.find(d => d.id === cancelUploadTargetId);
+    setDatasets(prev => prev.map(d => d.id === cancelUploadTargetId ? { ...d, status: 'failed', updateTime: new Date().toISOString() } : d));
+    toast.success('已取消上传', { description: dataset ? `已取消 ${dataset.title} 的上传（覆盖当前版本，不保留旧版本）` : '' });
+    setIsCancelUploadConfirmOpen(false);
+    setCancelUploadTargetId(null);
+  };
+
+  const handleReupload = (id: number) => {
+    setReuploadTargetId(id);
+    setIsLocalUploadDialogOpen(true);
+    toast.info('准备重新上传', { description: `请选择文件以重新上传数据集 ${id}` });
+  };
+
+  const handleQuickPreprocess = (id: number) => {
+    const dataset = datasets.find(d => d.id === id);
+    if (dataset) {
+      setSelectedDatasetForPreprocessing(dataset);
+      setIsDataPreprocessingOpen(true);
+    }
   };
 
   return (
@@ -683,9 +811,9 @@ export function DataManagement({
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="">所有状态</option>
-            <option value="active">活跃</option>
-            <option value="processing">处理中</option>
-            <option value="error">错误</option>
+            <option value="success">成功</option>
+            <option value="processing">导入中</option>
+            <option value="failed">失败</option>
           </select>
           
           <select
@@ -698,25 +826,41 @@ export function DataManagement({
             <option value="api">API</option>
             <option value="database">数据库</option>
           </select>
+
+          {/* 日期范围选择：更新时间 */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className="px-3 py-2 border border-gray-300 rounded-lg justify-start min-w-[260px]"
+              >
+                <CalendarIcon className="h-4 w-4 mr-2 text-gray-500" />
+                {advancedFilters.dateRange?.from && advancedFilters.dateRange?.to
+                  ? `${formatYYYYMMDD(advancedFilters.dateRange.from)} - ${formatYYYYMMDD(advancedFilters.dateRange.to)}`
+                  : '开始日期 - 结束日期'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="range"
+                numberOfMonths={2}
+                selected={advancedFilters.dateRange ?? undefined}
+                onSelect={(range: DateRange | undefined) => {
+                  setAdvancedFilters((prev) => ({ ...prev, dateRange: range ?? null }));
+                }}
+              />
+            </PopoverContent>
+          </Popover>
           
           <select
             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
           >
-            <option value="updateTime">更新时间</option>
             <option value="name">名称</option>
             <option value="size">大小</option>
             <option value="rows">行数</option>
           </select>
-          
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-          >
-            {sortOrder === 'asc' ? <ChevronDown className="h-4 w-4" /> : <ChevronDown className="h-4 w-4 rotate-180" />}
-          </Button>
           
           <Button
             variant="outline"
@@ -771,9 +915,6 @@ export function DataManagement({
         </div>
         
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleRefreshData}>
-            <RefreshCw className="h-4 w-4" />
-          </Button>
           <Button variant="outline" size="sm" onClick={() => setIsColumnSettingsOpen(true)}>
             <Columns className="h-4 w-4" />
           </Button>
@@ -813,15 +954,24 @@ export function DataManagement({
                     <CardTitle className="text-lg">{dataset.title}</CardTitle>
                   </div>
                   <div className="flex space-x-1">
-                    <Button variant="ghost" size="sm" onClick={() => handleEdit(dataset.id)}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleCopy(dataset.id)}>
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleSingleDelete(dataset.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {dataset.status === 'success' && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => handleEdit(dataset.id)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleCopy(dataset.id)}>
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleSingleDelete(dataset.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                    {dataset.status === 'failed' && (
+                      <Button variant="ghost" size="sm" onClick={() => handleSingleDelete(dataset.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -873,29 +1023,45 @@ export function DataManagement({
                 
                 <div className="flex justify-between items-center pt-2">
                   <div className="flex space-x-2">
-                    <Button variant="outline" size="sm" onClick={() => handleViewDataDetail(dataset.id)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => handleViewVersionHistory(dataset.id)}>
-                      <History className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        // 修复网格模式下预处理按钮无响应：与列表模式保持一致，直接打开预处理对话框
-                        setSelectedDatasetForPreprocessing(dataset);
-                        setIsDataPreprocessingOpen(true);
-                      }}
-                    >
-                      <Zap className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => handleDownload(dataset.id)}>
-                      <Download className="h-4 w-4" />
-                    </Button>
+                    {dataset.status === 'success' && (
+                      <>
+                        <Button variant="outline" size="sm" onClick={() => handleViewDataDetail(dataset.id)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleViewVersionHistory(dataset.id)}>
+                          <History className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleQuickPreprocess(dataset.id)}>
+                          <Zap className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleDownload(dataset.id)}>
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                    {dataset.status === 'processing' && (
+                      <>
+                        <Button variant="outline" size="sm" onClick={() => handleViewDataDetail(dataset.id)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleCancelUpload(dataset.id)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                    {dataset.status === 'failed' && (
+                      <>
+                        <Button variant="outline" size="sm" onClick={() => handleViewDataDetail(dataset.id)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleReupload(dataset.id)}>
+                          <Upload className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                   <Badge variant={dataset.status === 'success' ? 'default' : dataset.status === 'processing' ? 'secondary' : 'destructive'}>
-                    {dataset.status === 'success' ? '成功' : dataset.status === 'processing' ? '处理中' : '失败'}
+                    {dataset.status === 'success' ? '成功' : dataset.status === 'processing' ? '导入中' : '失败'}
                   </Badge>
                 </div>
               </CardContent>
@@ -904,161 +1070,204 @@ export function DataManagement({
         </div>
       ) : (
         <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">
+          <div className="p-2">
+            <VirtualTable
+              data={filteredAndSortedDatasets as any}
+              height={480}
+              density={'normal'}
+              enableColumnResize
+              enableColumnDrag
+              sortState={{ column: sortBy, order: sortOrder }}
+              onSortChange={(column, order) => {
+                if (["name", "size", "rows", "updateTime"].includes(column)) {
+                  setSortBy(column);
+                  setSortOrder(order);
+                }
+              }}
+              style={{ border: 'none' }}
+              headerRight={
+                <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
                     checked={selectAll}
                     onChange={handleSelectAll}
                     className="rounded"
                   />
-                </TableHead>
-                {columnSettings.name && <TableHead>名称</TableHead>}
-                {columnSettings.description && <TableHead>描述</TableHead>}
-                {columnSettings.categories && <TableHead>标签</TableHead>}
-                {columnSettings.format && <TableHead>格式</TableHead>}
-                {columnSettings.size && <TableHead>大小</TableHead>}
-                {columnSettings.rows && <TableHead>行数</TableHead>}
-                {columnSettings.columns && <TableHead>列数</TableHead>}
-                {columnSettings.completeness && <TableHead>完整度</TableHead>}
-                {columnSettings.source && <TableHead>来源</TableHead>}
-                {columnSettings.version && <TableHead>版本</TableHead>}
-                {columnSettings.updateTime && <TableHead>更新时间</TableHead>}
-                {columnSettings.status && <TableHead>状态</TableHead>}
-                {columnSettings.actions && <TableHead>操作</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedDatasets.map((dataset) => (
-                <TableRow key={dataset.id}>
-                  <TableCell>
+                  全选当前结果
+                </label>
+              }
+              columns={[
+                {
+                  key: 'select',
+                  label: '',
+                  width: 48,
+                  render: (_v: any, row: any) => (
                     <input
                       type="checkbox"
-                      checked={selectedDatasets.includes(dataset.id)}
-                      onChange={() => handleSelectDataset(dataset.id)}
+                      checked={selectedDatasets.includes(row.id)}
+                      onChange={() => handleSelectDataset(row.id)}
                       className="rounded"
                     />
-                  </TableCell>
-                  {columnSettings.name && (
-                    <TableCell className="font-medium">{dataset.title}</TableCell>
-                  )}
-                  {columnSettings.description && (
-                    <TableCell className="max-w-xs truncate">{dataset.description}</TableCell>
-                  )}
-                  {columnSettings.categories && (
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {dataset.tags.map((tag, index) => (
-                          <Badge key={index} className={tag.color}>
-                            {tag.name}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                  )}
-                  {columnSettings.format && <TableCell>{dataset.format}</TableCell>}
-                  {columnSettings.size && <TableCell>{dataset.size}</TableCell>}
-                  {columnSettings.rows && <TableCell>{dataset.rows}</TableCell>}
-                  {columnSettings.columns && <TableCell>{dataset.columns}</TableCell>}
-                  {columnSettings.completeness && (
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Progress value={dataset.completeness} className="h-2 w-16" />
-                        <span className="text-sm">{dataset.completeness}%</span>
-                      </div>
-                    </TableCell>
-                  )}
-                  {columnSettings.source && <TableCell>{dataset.source}</TableCell>}
-                  {columnSettings.version && <TableCell>{dataset.version}</TableCell>}
-                  {columnSettings.updateTime && <TableCell>{dataset.updateTime}</TableCell>}
-                  {columnSettings.status && (
-                    <TableCell>
-                      <Badge variant={dataset.status === 'success' ? 'default' : dataset.status === 'processing' ? 'secondary' : 'destructive'}>
-                        {dataset.status === 'success' ? '成功' : dataset.status === 'processing' ? '处理中' : '失败'}
-                      </Badge>
-                    </TableCell>
-                  )}
-                  {columnSettings.actions && (
-                    <TableCell>
-                      <div className="flex space-x-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleViewDataDetail(dataset.id)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleViewVersionHistory(dataset.id)}>
-                          <History className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => {
-                          setSelectedDatasetForPreprocessing(dataset);
-                          setIsDataPreprocessingOpen(true);
-                        }}>
-                          <Zap className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDownload(dataset.id)}>
-                          <Download className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleEdit(dataset.id)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleCopy(dataset.id)}>
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleSingleDelete(dataset.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                  )
+                },
+                columnSettings.name ? {
+                  key: 'name',
+                  label: '名称',
+                  sortable: true,
+                  render: (_v: any, row: any) => (
+                    <span className="font-medium">{row.title}</span>
+                  )
+                } : undefined,
+                columnSettings.description ? {
+                  key: 'description',
+                  label: '描述',
+                  render: (v: any) => (
+                    <span className="max-w-xs truncate inline-block align-middle">{v}</span>
+                  )
+                } : undefined,
+                columnSettings.categories ? {
+                  key: 'categories',
+                  label: '标签',
+                  render: (_v: any, row: any) => (
+                    <div className="flex flex-wrap gap-1">
+                      {row.tags.map((tag: any, index: number) => (
+                        <Badge key={index} className={tag.color}>{tag.name}</Badge>
+                      ))}
+                    </div>
+                  )
+                } : undefined,
+                columnSettings.format ? { key: 'format', label: '格式' } : undefined,
+                columnSettings.size ? { key: 'size', label: '大小', sortable: true } : undefined,
+                columnSettings.rows ? { key: 'rows', label: '行数', sortable: true } : undefined,
+                columnSettings.columns ? { key: 'columns', label: '列数' } : undefined,
+                columnSettings.completeness ? {
+                  key: 'completeness',
+                  label: '完整度',
+                  render: (v: any) => (
+                    <div className="flex items-center space-x-2">
+                      <Progress value={v} className="h-2 w-16" />
+                      <span className="text-sm">{v}%</span>
+                    </div>
+                  )
+                } : undefined,
+                columnSettings.source ? { key: 'source', label: '来源' } : undefined,
+                columnSettings.version ? { key: 'version', label: '版本' } : undefined,
+                columnSettings.updateTime ? { key: 'updateTime', label: '更新时间', sortable: true, render: (v: any) => formatYYYYMMDD(v) } : undefined,
+                columnSettings.status ? {
+                  key: 'status',
+                  label: '状态',
+                  render: (v: any) => (
+                    <Badge variant={v === 'success' ? 'default' : v === 'processing' ? 'secondary' : 'destructive'}>
+                      {v === 'success' ? '成功' : v === 'processing' ? '导入中' : '失败'}
+                    </Badge>
+                  )
+                } : undefined,
+                columnSettings.actions ? {
+                  key: 'actions',
+                  label: '操作',
+                  render: (_v: any, row: any) => (
+                    <div className="flex space-x-1">
+                      {row.status === 'success' && (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => handleViewDataDetail(row.id)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleViewVersionHistory(row.id)}>
+                            <History className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleQuickPreprocess(row.id)}>
+                            <Zap className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDownload(row.id)}>
+                            <Download className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(row.id)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleCopy(row.id)}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleSingleDelete(row.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                      {row.status === 'processing' && (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => handleViewDataDetail(row.id)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleCancelUpload(row.id)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                      {row.status === 'failed' && (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => handleViewDataDetail(row.id)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleReupload(row.id)}>
+                            <Upload className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleSingleDelete(row.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )
+                } : undefined,
+              ].filter(Boolean) as any}
+            />
+          </div>
         </Card>
       )}
 
-      {/* 分页控件 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <span className="text-sm text-gray-700">
-            显示 {(currentPage - 1) * itemsPerPage + 1} 到 {Math.min(currentPage * itemsPerPage, filteredAndSortedDatasets.length)} 条，共 {filteredAndSortedDatasets.length} 条
-          </span>
-          <select
-            className="px-2 py-1 border border-gray-300 rounded text-sm"
-            value={itemsPerPage}
-            onChange={(e) => {
-              setItemsPerPage(Number(e.target.value));
-              setCurrentPage(1);
-            }}
-          >
-            <option value={10}>10条/页</option>
-            <option value={20}>20条/页</option>
-            <option value={50}>50条/页</option>
-          </select>
+      {/* 分页控件：仅在网格视图显示 */}
+      {viewMode === 'grid' && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-700">
+              显示 {(currentPage - 1) * itemsPerPage + 1} 到 {Math.min(currentPage * itemsPerPage, filteredAndSortedDatasets.length)} 条，共 {filteredAndSortedDatasets.length} 条
+            </span>
+            <select
+              className="px-2 py-1 border border-gray-300 rounded text-sm"
+              value={itemsPerPage}
+              onChange={(e) => {
+                setItemsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+            >
+              <option value={10}>10条/页</option>
+              <option value={20}>20条/页</option>
+              <option value={50}>50条/页</option>
+            </select>
+          </div>
+          
+          <div className="flex space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+            >
+              上一页
+            </Button>
+            <span className="flex items-center px-3 py-1 text-sm">
+              第 {currentPage} 页，共 {totalPages} 页
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage === totalPages}
+            >
+              下一页
+            </Button>
+          </div>
         </div>
-        
-        <div className="flex space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-            disabled={currentPage === 1}
-          >
-            上一页
-          </Button>
-          <span className="flex items-center px-3 py-1 text-sm">
-            第 {currentPage} 页，共 {totalPages} 页
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-            disabled={currentPage === totalPages}
-          >
-            下一页
-          </Button>
-        </div>
-      </div>
+      )}
         </>
       )}
 
@@ -1166,32 +1375,36 @@ export function DataManagement({
                 </div>
               </div>
 
-              {/* 标签筛选 */}
+              {/* 标签筛选（改为模糊搜索） */}
               <div>
-                <label className="block text-sm font-medium mb-2">标签</label>
-                <div className="flex flex-wrap gap-2">
-                  {availableTags.map(tag => (
-                    <label key={tag} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={advancedFilters.categories.includes(tag)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setAdvancedFilters(prev => ({
-                              ...prev,
-                              categories: [...prev.categories, tag]
-                            }));
-                          } else {
-                            setAdvancedFilters(prev => ({
-                              ...prev,
-                              categories: prev.categories.filter(c => c !== tag)
-                            }));
-                          }
-                        }}
-                      />
-                      <span className="text-sm">{tag}</span>
-                    </label>
-                  ))}
+                <label className="block text-sm font-medium mb-2">标签（支持模糊搜索）</label>
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="输入标签关键字，例如：清洗、实时、CSV..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    value={advancedFilters.tagQuery}
+                    onChange={(e) => setAdvancedFilters(prev => ({ ...prev, tagQuery: e.target.value }))}
+                  />
+                  {advancedFilters.tagQuery && (
+                    <div className="flex flex-wrap gap-2">
+                      {availableTags
+                        .filter(tag => tag.toLowerCase().includes(advancedFilters.tagQuery.toLowerCase()))
+                        .map(tag => (
+                          <button
+                            key={tag}
+                            type="button"
+                            className="text-xs px-2 py-1 border rounded hover:bg-gray-100"
+                            onClick={() => setAdvancedFilters(prev => ({ ...prev, tagQuery: tag }))}
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      {availableTags.filter(tag => tag.toLowerCase().includes(advancedFilters.tagQuery.toLowerCase())).length === 0 && (
+                        <span className="text-xs text-gray-500">无匹配标签</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1234,7 +1447,7 @@ export function DataManagement({
                     rowsRange: [0, 1000000],
                     completenessRange: [0, 100],
                     dateRange: null,
-                    categories: [],
+                    tagQuery: '',
                     formats: []
                   });
                 }}
@@ -1361,20 +1574,60 @@ export function DataManagement({
         </div>
       )}
 
+      {/* 取消上传确认弹窗 */}
+      {isCancelUploadConfirmOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center space-x-3 mb-4">
+              <AlertTriangle className="h-6 w-6 text-amber-500" />
+              <h3 className="text-lg font-semibold">确认取消上传</h3>
+            </div>
+            
+            <p className="text-gray-600 mb-6">
+              确定要取消该数据集的上传吗？此操作将立即终止上传，并将状态标记为“失败”。此操作不可撤销。
+            </p>
+
+            <div className="flex justify-end space-x-2">
+              <Button
+                variant="outline"
+                onClick={() => { setIsCancelUploadConfirmOpen(false); setCancelUploadTargetId(null); }}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleConfirmCancelUpload}
+              >
+                确认取消上传
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 数据上传对话框 */}
       <DataUpload
         isOpen={isLocalUploadDialogOpen}
         onClose={() => {
           setIsLocalUploadDialogOpen(false);
+          setReuploadTargetId(null);
           if (onUploadDialogClose) {
             onUploadDialogClose();
           }
         }}
         onUploadSuccess={(datasetId) => {
-          toast.success('数据上传成功', {
-            description: `数据集 ${datasetId} 已成功创建`
-          });
+          if (reuploadTargetId !== null) {
+            // 重新上传：更新对应数据集状态为成功
+            setDatasets(prev => prev.map(d => d.id === reuploadTargetId ? { ...d, status: 'success', updateTime: new Date().toISOString() } : d));
+            toast.success('重新上传成功', {
+              description: `数据集 ${reuploadTargetId} 已重新上传完成`
+            });
+            setReuploadTargetId(null);
+          } else {
+            toast.success('数据上传成功', {
+              description: `数据集 ${datasetId} 已成功创建`
+            });
+          }
           // 刷新数据列表
           handleRefreshData();
         }}
@@ -1655,17 +1908,6 @@ export function DataManagement({
       {/* 数据预处理任务列表（恢复为列表优先展示） */}
       {activeSubmenu === 'preprocessing' && (
         <div className="space-y-6">
-          {/* 顶部提示（处理中的任务） */}
-          <Card>
-            <CardContent className="flex items-center gap-3 p-4">
-              <Info className="h-5 w-5 text-blue-600" />
-              <div>
-                <p className="text-sm font-medium text-blue-700">处理中的任务</p>
-                <p className="text-xs text-blue-600">当前有 {preprocessingTasks.filter(t => t.status === 'running').length} 个预处理任务正在执行中，请耐心等待处理完成。</p>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* 标题与创建按钮 */}
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold">预处理任务管理</h2>
@@ -1678,29 +1920,79 @@ export function DataManagement({
             </Button>
           </div>
 
+          {/* 筛选栏 */}
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={taskFilters.status} onValueChange={(v: 'all' | 'success' | 'running' | 'pending' | 'failed') => setTaskFilters(prev => ({...prev, status: v }))}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="running">进行中</SelectItem>
+                <SelectItem value="pending">待执行</SelectItem>
+                <SelectItem value="success">已完成</SelectItem>
+                <SelectItem value="failed">失败</SelectItem>
+              </SelectContent>
+            </Select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <CalendarIcon className="h-4 w-4" />
+                  {taskFilters.dateRange ? `${formatYYYYMMDD(taskFilters.dateRange.from)} ~ ${formatYYYYMMDD(taskFilters.dateRange.to)}` : '创建时间范围'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="range"
+                  selected={taskFilters.dateRange ?? undefined}
+                  onSelect={(range: DateRange | undefined) => setTaskFilters(prev => ({...prev, dateRange: range ?? null}))}
+                  initialFocus
+                />
+                <div className="p-2 flex justify-end">
+                  <Button variant="ghost" size="sm" onClick={() => setTaskFilters(prev => ({...prev, dateRange: null}))}>清除</Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+            <div className="flex-1 min-w-[200px]">
+              <Input
+                placeholder="按任务ID或数据集搜索"
+                value={taskFilters.datasetQuery}
+                onChange={(e) => setTaskFilters(prev => ({...prev, datasetQuery: e.target.value}))}
+              />
+            </div>
+          </div>
+
           {/* 任务列表表格 */}
           <Card>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>任务名称</TableHead>
+                  <TableHead>任务ID</TableHead>
                   <TableHead>数据集</TableHead>
                   <TableHead>类型</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>操作内容</TableHead>
                   <TableHead>开始时间</TableHead>
+                  <TableHead>完成时间</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {preprocessingTasks.map(task => (
+                {filteredPreprocessingTasks.map(task => (
                   <TableRow key={task.id}>
-                    <TableCell className="font-medium">{task.name}</TableCell>
-                    <TableCell>{task.dataset}</TableCell>
+                    <TableCell className="font-medium">{task.id}</TableCell>
+                    <TableCell>
+                      <Button variant="link" className="p-0 h-auto" onClick={() => handleDatasetClick(task.dataset)}>
+                        {task.dataset}
+                      </Button>
+                    </TableCell>
                     <TableCell>{task.type}</TableCell>
                     <TableCell>
-                      {task.status === 'completed' && (
+                      {task.status === 'success' && (
                         <Badge variant="default">已完成</Badge>
+                      )}
+                      {task.status === 'failed' && (
+                        <Badge variant="destructive">失败</Badge>
                       )}
                       {task.status === 'running' && (
                         <div className="flex items-center gap-2">
@@ -1724,14 +2016,35 @@ export function DataManagement({
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell>{task.startTime || '-'}</TableCell>
+                    <TableCell>{formatYYYYMMDD(task.startTime)}</TableCell>
+                    <TableCell>{formatYYYYMMDD(task.completedAt)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>查看详情</Button>
-                        {task.status === 'running' ? (
-                          <Button variant="destructive" size="sm" onClick={() => handleStopTask(task.id)}>停止</Button>
-                        ) : (
-                          <Button size="sm" onClick={() => handleStartTask(task.id)}>开始执行</Button>
+                        {task.status === 'running' && (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>查看详情</Button>
+                            <Button variant="destructive" size="sm" onClick={() => handleStopTask(task.id)}>停止</Button>
+                          </>
+                        )}
+                        {task.status === 'pending' && (
+                          <>
+                            <Button size="sm" onClick={() => handleStartTask(task.id)}>开始执行</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleEditTask(task.id)}>编辑</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteTask(task.id)}>删除</Button>
+                          </>
+                        )}
+                        {task.status === 'failed' && (
+                          <>
+                            <Button size="sm" onClick={() => handleRetryTask(task.id)}>重试</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleCopyRules(task.id)}>复制规则</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteTask(task.id)}>删除</Button>
+                          </>
+                        )}
+                        {task.status === 'success' && (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>查看详情</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleCopyRules(task.id)}>复制规则</Button>
+                          </>
                         )}
                       </div>
                     </TableCell>

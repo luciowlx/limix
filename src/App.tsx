@@ -14,6 +14,7 @@ import { ReportView } from "./components/ReportView";
 import { DataDetailFullPage } from "./components/DataDetailFullPage";
 import TaskDetailFullPage from "./components/TaskDetailFullPage";
 import TaskCompare from "./components/TaskCompare";
+import { TASK_TYPES } from "./utils/taskTypes";
 import { ProjectCard } from "./components/ProjectCard";
 import { ProjectDetailCards } from "./components/ProjectDetailCards";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
@@ -29,13 +30,16 @@ import { X, Search, Grid3X3, List, ChevronDown, Calendar, Users, Database, Trend
 import { Toaster } from "./components/ui/sonner";
 import { Checkbox } from "./components/ui/checkbox";
 import FloatingAssistantEntry from "./components/FloatingAssistantEntry";
+import TeamMemberSelector from "./components/TeamMemberSelector";
+import { registeredUsers } from "./mock/users";
+import { Popover, PopoverTrigger, PopoverContent } from "./components/ui/popover";
+import { Calendar as DateRangeCalendar } from "./components/ui/calendar";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("看板");
   const [showModelTuning, setShowModelTuning] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   const [projectFormData, setProjectFormData] = useState({
-    projectMode: "", // 项目模式（traditional/auto）
     projectName: "",
     projectDescription: "",
     projectStartDate: "", // 项目开始日期
@@ -49,7 +53,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all");
+  const [projectDateRange, setProjectDateRange] = useState<{ start: string; end: string }>({ start: "", end: "" });
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isProjectDetailOpen, setIsProjectDetailOpen] = useState(false);
   const [isProjectManageOpen, setIsProjectManageOpen] = useState(false);
@@ -61,8 +65,8 @@ export default function App() {
     teamLeader: "",
     projectStartDate: "",
     projectEndDate: "",
-    inviteEmail: "",
-    projectVisibility: "private"
+    projectVisibility: "private",
+    teamMembers: [] as string[]
   });
   const [isDuplicateConfirmOpen, setIsDuplicateConfirmOpen] = useState(false);
   const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false);
@@ -102,15 +106,7 @@ export default function App() {
 
   // AI助手已统一到 FullPageView（type='ai-assistant'），不再单独维护 isAIAssistantOpen
 
-  // 团队成员管理状态
-  const [memberSearchQuery, setMemberSearchQuery] = useState("");
-  const [availableMembers] = useState([
-    { id: "1", name: "张三", email: "zhangsan@company.com", department: "技术部" },
-    { id: "2", name: "李四", email: "lisi@company.com", department: "产品部" },
-    { id: "3", name: "王五", email: "wangwu@company.com", department: "设计部" },
-    { id: "4", name: "赵六", email: "zhaoliu@company.com", department: "技术部" },
-    { id: "5", name: "钱七", email: "qianqi@company.com", department: "运营部" }
-  ]);
+  // 团队成员由统一组件 TeamMemberSelector 管理（移除本地 availableMembers 与搜索状态）
 
   const projects = [
     {
@@ -227,19 +223,24 @@ export default function App() {
   const filteredProjects = projects.filter(project => {
     const matchesSearch = project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          project.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || project.status === statusFilter;
+    const matchesStatus =
+      statusFilter === "all" ||
+      project.status === statusFilter ||
+      // 兼容旧数据：若项目状态为“暂停”，在筛选选择“已延期”时也匹配
+      (statusFilter === "已延期" && project.status === "暂停");
     const matchesOwner = ownerFilter === "all" || project.owner === ownerFilter;
-    const matchesDate = dateFilter === "all"; // 简化处理，实际项目中可以添加日期过滤逻辑
+    // 日期范围筛选：按项目创建时间 createdTime（若无则按 date）过滤
+    const projectCreated = new Date(project.createdTime || project.date);
+    const start = projectDateRange.start ? new Date(projectDateRange.start) : null;
+    const end = projectDateRange.end ? new Date(projectDateRange.end) : null;
+    const matchesDate = (!start || projectCreated >= start) && (!end || projectCreated <= end);
     
     return matchesSearch && matchesStatus && matchesOwner && matchesDate;
   });
 
   const handleCreateProject = () => {
     // 验证必填字段
-    if (!projectFormData.projectMode) {
-      alert("请选择项目模式");
-      return;
-    }
+
     if (!projectFormData.projectName.trim()) {
       alert("请输入项目名称");
       return;
@@ -256,6 +257,10 @@ export default function App() {
       alert("项目结束日期必须晚于开始日期");
       return;
     }
+    if (!projectFormData.teamLeader.trim()) {
+      alert("请选择团队负责人");
+      return;
+    }
     
     // 处理创建项目逻辑
     console.log("创建项目:", projectFormData);
@@ -263,13 +268,12 @@ export default function App() {
     // 设置当前项目
     setCurrentProject({
       name: projectFormData.projectName,
-      mode: projectFormData.projectMode as 'traditional' | 'auto'
+      mode: 'traditional'
     });
     
     setIsCreateProjectOpen(false);
     // 重置表单
     setProjectFormData({
-      projectMode: "",
       projectName: "",
       projectDescription: "",
       projectStartDate: "",
@@ -278,14 +282,13 @@ export default function App() {
       teamLeader: "当前用户",
       teamMembers: []
     });
-    setMemberSearchQuery("");
+
   };
 
   const handleCancelProject = () => {
     setIsCreateProjectOpen(false);
     // 重置表单
     setProjectFormData({
-      projectMode: "",
       projectName: "",
       projectDescription: "",
       projectStartDate: "",
@@ -294,33 +297,14 @@ export default function App() {
       teamLeader: "当前用户",
       teamMembers: []
     });
-    setMemberSearchQuery("");
+
   };
 
-  // 团队成员管理函数
-  const handleAddTeamMember = (memberName: string) => {
-    if (!projectFormData.teamMembers.includes(memberName)) {
-      setProjectFormData({
-        ...projectFormData,
-        teamMembers: [...projectFormData.teamMembers, memberName]
-      });
-    }
-  };
+  // 团队成员管理已由 TeamMemberSelector 统一处理（移除本地添加逻辑）
 
-  const handleRemoveTeamMember = (memberName: string) => {
-    setProjectFormData({
-      ...projectFormData,
-      teamMembers: projectFormData.teamMembers.filter(member => member !== memberName)
-    });
-  };
+  // 团队成员移除逻辑也由 TeamMemberSelector 统一处理（移除本地移除函数）
 
-  // 过滤可用成员（排除已选择的成员）
-  const filteredMembers = availableMembers.filter(member =>
-    !projectFormData.teamMembers.includes(member.name) &&
-    (member.name.toLowerCase().includes(memberSearchQuery.toLowerCase()) ||
-    member.email.toLowerCase().includes(memberSearchQuery.toLowerCase()) ||
-    member.department.toLowerCase().includes(memberSearchQuery.toLowerCase()))
-  );
+  // 成员过滤与搜索逻辑由 TeamMemberSelector 内部实现（移除本地 filteredMembers）
 
   const handleViewProjectDetails = (project: any) => {
     setSelectedProject(project);
@@ -335,8 +319,8 @@ export default function App() {
       teamLeader: project.teamLeader || "",
       projectStartDate: project.startDate || "",
       projectEndDate: project.endDate || "",
-      inviteEmail: "",
-      projectVisibility: project.visibility || "private"
+      projectVisibility: project.visibility || "private",
+      teamMembers: Array.isArray(project?.members) ? project.members : []
     });
     setIsProjectManageOpen(true);
   };
@@ -395,20 +379,18 @@ export default function App() {
     // 这里可以添加实际的项目复制逻辑
   };
 
-  const handleInviteMember = () => {
-    if (manageFormData.inviteEmail) {
-      console.log("邀请成员:", manageFormData.inviteEmail);
-      setManageFormData({...manageFormData, inviteEmail: ""});
-    }
-  };
+  // 成员邀请逻辑已由 TeamMemberSelector 统一管理，无需单独通过邮箱邀请
 
   const handleCancelManage = () => {
     setIsProjectManageOpen(false);
     setManageFormData({
       projectName: "",
       projectDescription: "",
-      inviteEmail: "",
-      projectVisibility: "private"
+      teamLeader: "",
+      projectStartDate: "",
+      projectEndDate: "",
+      projectVisibility: "private",
+      teamMembers: []
     });
   };
 
@@ -543,7 +525,7 @@ export default function App() {
                       <SelectItem value="all">全部状态</SelectItem>
                       <SelectItem value="进行中">进行中</SelectItem>
                       <SelectItem value="已完成">已完成</SelectItem>
-                      <SelectItem value="暂停">暂停</SelectItem>
+                      <SelectItem value="已延期">已延期</SelectItem>
                     </SelectContent>
                   </Select>
 
@@ -561,19 +543,65 @@ export default function App() {
                     </SelectContent>
                   </Select>
 
-                  {/* Date Filter */}
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
-                    <SelectTrigger className="w-32">
-                      <SelectValue placeholder="日期" />
-                      <ChevronDown className="w-4 h-4" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部日期</SelectItem>
-                      <SelectItem value="today">今天</SelectItem>
-                      <SelectItem value="week">本周</SelectItem>
-                      <SelectItem value="month">本月</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {/* Date Filter: 替换为日期范围选择 */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-[320px] justify-between">
+                        <span className="truncate text-left">
+                          {projectDateRange.start && projectDateRange.end
+                            ? `${projectDateRange.start} - ${projectDateRange.end}`
+                            : '开始日期 - 结束日期'}
+                        </span>
+                        <Calendar className="h-4 w-4 text-gray-500" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[640px] p-4">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            readOnly
+                            placeholder="开始日期"
+                            value={projectDateRange.start || ''}
+                            className="w-48"
+                          />
+                          <span className="text-gray-500">-</span>
+                          <Input
+                            readOnly
+                            placeholder="结束日期"
+                            value={projectDateRange.end || ''}
+                            className="w-48"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setProjectDateRange({ start: '', end: '' })}
+                          >
+                            清除
+                          </Button>
+                        </div>
+                        <DateRangeCalendar
+                          mode="range"
+                          numberOfMonths={2}
+                          initialFocus
+                          defaultMonth={projectDateRange.start ? new Date(projectDateRange.start) : new Date()}
+                          selected={{
+                            from: projectDateRange.start ? new Date(projectDateRange.start) : undefined,
+                            to: projectDateRange.end ? new Date(projectDateRange.end) : undefined,
+                          }}
+                          onSelect={(range: any) => {
+                            const startDate = range?.from ? new Date(range.from) : undefined;
+                            const endDate = range?.to ? new Date(range.to) : undefined;
+                            const fmt = (d: Date | undefined) =>
+                              d
+                                ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+                                : '';
+                            setProjectDateRange({ start: fmt(startDate), end: fmt(endDate) });
+                          }}
+                        />
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
                 </div>
 
                 {/* 视图切换按钮 */}
@@ -739,67 +767,7 @@ export default function App() {
                 </SheetHeader>
                 
                 <div className="px-6 py-6 space-y-6">
-                  {/* 项目模式选择 */}
-                  <div className="space-y-4">
-                    <Label className="text-sm font-medium">
-                      选择项目模式 <span className="text-red-500">*</span>
-                    </Label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* 传统模式 */}
-                      <div 
-                        className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                          projectFormData.projectMode === 'traditional' 
-                            ? 'border-blue-500 bg-blue-50' 
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                        onClick={() => setProjectFormData({...projectFormData, projectMode: 'traditional'})}
-                      >
-                        <div className="flex items-start space-x-3">
-                          <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center mt-1">
-                            {projectFormData.projectMode === 'traditional' && (
-                              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <h3 className="font-medium text-gray-900">传统模式</h3>
-                            <p className="text-sm text-gray-600 mt-1">
-                              完整的AI模型开发流程，包含数据管理、任务管理、模型训练等全套功能
-                            </p>
-                            <div className="mt-2 text-xs text-gray-500">
-                              • 完整数据管理 • 任务流程管理 • 模型训练调优 • 团队协作
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 自动模式 */}
-                      <div 
-                        className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                          projectFormData.projectMode === 'auto' 
-                            ? 'border-green-500 bg-green-50' 
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                        onClick={() => setProjectFormData({...projectFormData, projectMode: 'auto'})}
-                      >
-                        <div className="flex items-start space-x-3">
-                          <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center mt-1">
-                            {projectFormData.projectMode === 'auto' && (
-                              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <h3 className="font-medium text-gray-900">自动模式 <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full ml-1">智能</span></h3>
-                            <p className="text-sm text-gray-600 mt-1">
-                              基于自然语言的智能问数系统，通过对话快速获取数据洞察和可视化图表
-                            </p>
-                            <div className="mt-2 text-xs text-gray-500">
-                              • 自然语言查询 • 智能图表生成 • 数据洞察分析 • 一键式操作
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  {/* 项目模式选择（已移除） */}
 
                   {/* 项目名称和团队负责人 */}
                   <div className="grid grid-cols-2 gap-4">
@@ -821,15 +789,15 @@ export default function App() {
                       </Label>
                       <Select 
                         value={projectFormData.teamLeader} 
-                        onValueChange={(value) => setProjectFormData({...projectFormData, teamLeader: value})}
+                        onValueChange={(value: string) => setProjectFormData({...projectFormData, teamLeader: value})}
                       >
                         <SelectTrigger className="h-10">
                           <SelectValue placeholder="选择团队负责人" />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableMembers.map((member) => (
-                            <SelectItem key={member.id} value={member.name}>
-                              {member.name}
+                          {registeredUsers.map((u) => (
+                            <SelectItem key={u.id} value={u.realName}>
+                              {u.realName}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -888,7 +856,7 @@ export default function App() {
                       </Label>
                       <RadioGroup 
                         value={projectFormData.projectVisibility} 
-                        onValueChange={(value) => setProjectFormData({...projectFormData, projectVisibility: value})}
+                        onValueChange={(value: string) => setProjectFormData({...projectFormData, projectVisibility: value})}
                         className="space-y-2"
                       >
                         <div className="flex items-center space-x-2">
@@ -906,67 +874,11 @@ export default function App() {
                       </RadioGroup>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">团队成员</Label>
-                      
-                      {/* 搜索框 */}
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                        <Input
-                          placeholder="搜索组织成员..."
-                          value={memberSearchQuery}
-                          onChange={(e) => setMemberSearchQuery(e.target.value)}
-                          className="pl-10 h-10"
-                        />
-                      </div>
-
-                    {/* 搜索结果 */}
-                    {memberSearchQuery && (
-                      <div className="border rounded-lg max-h-32 overflow-y-auto">
-                        {filteredMembers.length > 0 ? (
-                          filteredMembers.map((member) => (
-                            <div 
-                              key={member.id}
-                              className="flex items-center justify-between p-2 hover:bg-gray-50 cursor-pointer"
-                              onClick={() => handleAddTeamMember(member.name)}
-                            >
-                              <span className="text-sm">{member.name}</span>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
-                                <UserPlus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="p-2 text-sm text-gray-500">未找到匹配的成员</div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 已选择的团队成员 */}
-                    {projectFormData.teamMembers.length > 0 && (
-                      <div className="space-y-1">
-                        <div className="text-xs text-gray-600">已选择成员：</div>
-                        <div className="flex flex-wrap gap-2">
-                          {projectFormData.teamMembers.map((member) => (
-                            <div 
-                              key={member}
-                              className="flex items-center space-x-1 bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-sm"
-                            >
-                              <span>{member}</span>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-4 w-4 p-0 hover:bg-blue-100"
-                                onClick={() => handleRemoveTeamMember(member)}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                    <TeamMemberSelector
+                      selectedIds={projectFormData.teamMembers}
+                      onChange={(ids) => setProjectFormData({ ...projectFormData, teamMembers: ids })}
+                      currentUserRole="项目经理"
+                     />
                 </div>
               </div>
 
@@ -980,7 +892,6 @@ export default function App() {
                     className="bg-blue-500 hover:bg-blue-600"
                     disabled={
                       !projectFormData.projectName || 
-                      !projectFormData.projectMode || 
                       !projectFormData.projectStartDate || 
                       !projectFormData.projectEndDate ||
                       !projectFormData.projectVisibility ||
@@ -1005,28 +916,6 @@ export default function App() {
                       </Badge>
                     </div>
                     <div className="flex items-center gap-3">
-                      {/* 模式切换 */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-600">显示模式:</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setProjectDetailMode(projectDetailMode === 'traditional' ? 'auto' : 'traditional')}
-                          className="flex items-center gap-2"
-                        >
-                          {projectDetailMode === 'traditional' ? (
-                            <>
-                              <ToggleLeft className="h-4 w-4" />
-                              传统模式
-                            </>
-                          ) : (
-                            <>
-                              <ToggleRight className="h-4 w-4" />
-                              自动模式
-                            </>
-                          )}
-                        </Button>
-                      </div>
                       <Button 
                         variant="ghost" 
                         size="sm" 
@@ -1127,14 +1016,14 @@ export default function App() {
                       
                       <div className="space-y-2">
                         <Label htmlFor="manage-team-leader" className="text-sm">团队负责人 <span className="text-red-500">*</span></Label>
-                        <Select value={manageFormData.teamLeader} onValueChange={(value) => setManageFormData({...manageFormData, teamLeader: value})}>
+                        <Select value={manageFormData.teamLeader} onValueChange={(value: string) => setManageFormData({...manageFormData, teamLeader: value})}>
                           <SelectTrigger className="h-10">
                             <SelectValue placeholder="选择团队负责人" />
                           </SelectTrigger>
                           <SelectContent>
-                            {availableMembers.map((member) => (
-                              <SelectItem key={member.id} value={member.name}>
-                                {member.name}
+                            {registeredUsers.map((u) => (
+                              <SelectItem key={u.id} value={u.realName}>
+                                {u.realName}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1175,32 +1064,13 @@ export default function App() {
                       <div className="text-lg">👥</div>
                       <h3 className="text-lg font-medium">团队管理</h3>
                     </div>
-                    
-                    <div className="space-y-4">
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                          <Input
-                            placeholder="输入成员邮箱"
-                            value={manageFormData.inviteEmail}
-                            onChange={(e) => setManageFormData({...manageFormData, inviteEmail: e.target.value})}
-                            className="pl-10 h-10"
-                          />
-                        </div>
-                        <Button 
-                          onClick={handleInviteMember}
-                          className="bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-2"
-                          disabled={!manageFormData.inviteEmail}
-                        >
-                          <UserPlus className="h-4 w-4" />
-                          邀请成员
-                        </Button>
-                      </div>
-                      
-                      <div className="text-sm text-gray-600">
-                        当前团队成员：{selectedProject?.members} 人
-                      </div>
-                    </div>
+
+                    <TeamMemberSelector
+                      selectedIds={manageFormData.teamMembers ?? []}
+                      onChange={(ids) => setManageFormData({ ...manageFormData, teamMembers: ids })}
+                      projectId={selectedProject?.id ?? ''}
+                      currentUserRole="项目经理"
+                    />
                   </div>
 
                   {/* 项目权限 */}
@@ -1212,7 +1082,7 @@ export default function App() {
                     
                     <RadioGroup 
                       value={manageFormData.projectVisibility} 
-                      onValueChange={(value) => setManageFormData({...manageFormData, projectVisibility: value})}
+                      onValueChange={(value: string) => setManageFormData({...manageFormData, projectVisibility: value})}
                       className="space-y-3"
                     >
                       <div className="flex items-start space-x-3">
@@ -1308,7 +1178,7 @@ export default function App() {
                       <label className="flex items-center gap-3 cursor-pointer select-none">
                         <Checkbox
                           checked={duplicateOptions.copyTasks}
-                          onCheckedChange={(checked) => toggleDuplicateOption("copyTasks", Boolean(checked))}
+                          onCheckedChange={(checked: boolean) => toggleDuplicateOption("copyTasks", checked)}
                           aria-label="复制项目下的任务"
                         />
                         <span className="text-sm">复制项目下的任务</span>
@@ -1316,7 +1186,7 @@ export default function App() {
                       <label className="flex items-center gap-3 cursor-pointer select-none">
                         <Checkbox
                           checked={duplicateOptions.copyDatasets}
-                          onCheckedChange={(checked) => toggleDuplicateOption("copyDatasets", Boolean(checked))}
+                          onCheckedChange={(checked: boolean) => toggleDuplicateOption("copyDatasets", checked)}
                           aria-label="复制项目下的数据集"
                         />
                         <span className="text-sm">复制项目下的数据集</span>
@@ -1324,7 +1194,7 @@ export default function App() {
                       <label className="flex items-center gap-3 cursor-pointer select-none">
                         <Checkbox
                           checked={duplicateOptions.copyMembers}
-                          onCheckedChange={(checked) => toggleDuplicateOption("copyMembers", Boolean(checked))}
+                          onCheckedChange={(checked: boolean) => toggleDuplicateOption("copyMembers", checked)}
                           aria-label="复制项目成员"
                         />
                         <span className="text-sm">复制项目成员</span>
@@ -1409,7 +1279,7 @@ export default function App() {
             </div>
             <TaskManagement 
               isCreateTaskDialogOpen={isCreateTaskDialogOpen}
-              onCreateTaskDialogClose={() => setIsCreateTaskDialogOpen(false)}
+              onCreateTaskDialogChange={(open: boolean) => setIsCreateTaskDialogOpen(open)}
               onOpenTaskDetailFullPage={handleOpenTaskDetailFullPage}
             />
           </div>
@@ -1450,7 +1320,7 @@ export default function App() {
 
   const taskCompareDemoA = {
     info: { id: 'TASK-A', name: '缺陷识别-ResNet', dataset: '缺陷图像数据集 v1.0', model: 'ResNet50', params: { lr: 0.001, batch_size: 32 } },
-    type: 'classification' as const,
+    type: TASK_TYPES.classification,
     metrics: {
       accuracy: 0.9144, precision: 0.902, recall: 0.895, f1: 0.898, rocAuc: 0.945,
       rocCurve: Array.from({ length: 21 }, (_, i) => ({ fpr: i/20, tpr: Math.min(1, Math.pow(i/20, 0.6)) })),
@@ -1482,7 +1352,7 @@ export default function App() {
 
   const taskCompareDemoB = {
     info: { id: 'TASK-B', name: '缺陷识别-EfficientNet', dataset: '缺陷图像数据集 v1.0', model: 'EfficientNet-B0', params: { lr: 0.0008, batch_size: 64 } },
-    type: 'classification' as const,
+    type: TASK_TYPES.classification,
     metrics: {
       accuracy: 0.904, precision: 0.895, recall: 0.882, f1: 0.888, rocAuc: 0.936,
       rocCurve: Array.from({ length: 21 }, (_, i) => ({ fpr: i/20, tpr: Math.min(1, Math.pow(i/20, 0.65)) })),
@@ -1565,25 +1435,29 @@ export default function App() {
 
       {/* AI助手已统一到 FullPageView（type='ai-assistant'） */}
 
-      {/* 浮动预览入口：任务对比 */}
-      <div className="fixed bottom-6 right-6 space-y-2 z-50">
-        <button
-          className="shadow-lg rounded-full px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700"
-          onClick={() => setShowTaskCompareDemo(true)}
-        >
-          任务对比预览
-        </button>
-      </div>
+      {/* 浮动预览入口：任务对比（仅在任务管理页显示） */}
+      {activeTab === '任务管理' && (
+        <>
+          <div className="fixed bottom-6 right-6 space-y-2 z-50">
+            <button
+              className="shadow-lg rounded-full px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700"
+              onClick={() => setShowTaskCompareDemo(true)}
+            >
+              任务对比预览
+            </button>
+          </div>
 
-      {/* 任务对比页面 */}
-      <Dialog open={showTaskCompareDemo} onOpenChange={setShowTaskCompareDemo}>
-        <DialogContent className="sm:max-w-6xl max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
-          <DialogHeader>
-            <DialogTitle>任务对比预览</DialogTitle>
-          </DialogHeader>
-          <TaskCompare task1={taskCompareDemoA as any} task2={taskCompareDemoB as any} onBack={() => setShowTaskCompareDemo(false)} />
-        </DialogContent>
-      </Dialog>
+          {/* 任务对比页面 */}
+          <Dialog open={showTaskCompareDemo} onOpenChange={setShowTaskCompareDemo}>
+            <DialogContent className="sm:max-w-6xl max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+              <DialogHeader>
+                <DialogTitle>任务对比预览</DialogTitle>
+              </DialogHeader>
+              <TaskCompare task1={taskCompareDemoA as any} task2={taskCompareDemoB as any} onBack={() => setShowTaskCompareDemo(false)} />
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
 
       {/* 全局悬浮动态助手入口（与右上角智能助手按钮同源） */}
       <FloatingAssistantEntry onOpenAIAssistant={handleOpenAIAssistant} />

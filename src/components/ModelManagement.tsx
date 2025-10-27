@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
+import { VirtualTable } from "./ui/virtual-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Checkbox } from "./ui/checkbox";
@@ -28,6 +29,10 @@ interface Model {
 interface ModelManagementProps {
   onOpenModelTuning?: () => void;
 }
+
+// 新增：排序类型定义
+type SortField = 'name' | 'version' | 'type' | 'accuracy' | 'status' | 'deployStatus' | 'size' | 'createTime';
+type SortOrder = 'asc' | 'desc';
 
 
 
@@ -115,7 +120,91 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
-  // 处理函数
+  // 新增：排序状态与排序后的数据
+  const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({ field: 'createTime', order: 'desc' });
+
+  const sortedModels = useMemo(() => {
+    const arr = [...filteredModels];
+    const dir = sortConfig.order === 'asc' ? 1 : -1;
+    const getAccuracy = (s: string) => {
+      const n = parseFloat((s || '').replace('%',''));
+      return isNaN(n) ? 0 : n;
+    };
+    const getSizeMB = (s: string) => {
+      const m = /([\d.]+)\s*(KB|MB|GB)?/i.exec(s || '');
+      let val = parseFloat(m?.[1] || '0');
+      const unit = (m?.[2] || 'MB').toUpperCase();
+      if (unit === 'GB') val *= 1024;
+      if (unit === 'KB') val /= 1024;
+      return isNaN(val) ? 0 : val;
+    };
+    const getVersionNum = (s: string) => {
+      const v = parseFloat((s || '').replace(/^v/i, ''));
+      return isNaN(v) ? 0 : v;
+    };
+    const statusRank = (s: string) => {
+      const map: Record<string, number> = { '已完成': 3, '训练中': 2, '待训练': 1 };
+      return map[s] ?? 0;
+    };
+    const deployRank = (s: string) => {
+      const map: Record<string, number> = { '已部署': 3, '部署中': 2, '部署失败': 1, '未部署': 0 };
+      return map[s] ?? 0;
+    };
+
+    arr.sort((a, b) => {
+      switch (sortConfig.field) {
+        case 'name':
+          return dir * a.name.localeCompare(b.name, 'zh-Hans');
+        case 'version':
+          return dir * (getVersionNum(a.version) - getVersionNum(b.version));
+        case 'type':
+          return dir * a.type.localeCompare(b.type, 'zh-Hans');
+        case 'accuracy':
+          return dir * (getAccuracy(a.accuracy) - getAccuracy(b.accuracy));
+        case 'status':
+          return dir * (statusRank(a.status) - statusRank(b.status));
+        case 'deployStatus':
+          return dir * (deployRank(a.deployStatus) - deployRank(b.deployStatus));
+        case 'size':
+          return dir * (getSizeMB(a.size) - getSizeMB(b.size));
+        case 'createTime':
+        default:
+          return dir * ((new Date(a.createTime).getTime()) - (new Date(b.createTime).getTime()));
+      }
+    });
+    return arr;
+  }, [filteredModels, sortConfig]);
+
+  // 新增：行选择与批量操作状态/方法
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+  const allVisibleIds = useMemo(() => sortedModels.map(m => m.id), [sortedModels]);
+  const isAllSelected = useMemo(() => allVisibleIds.length > 0 && allVisibleIds.every(id => selectedModelIds.includes(id)), [allVisibleIds, selectedModelIds]);
+
+  const handleToggleSelect = (id: string, checked: boolean) => {
+    setSelectedModelIds(prev => checked ? Array.from(new Set([...prev, id])) : prev.filter(x => x !== id));
+  };
+  const handleSelectAllVisible = (checked: boolean) => {
+    setSelectedModelIds(prev => checked ? Array.from(new Set([...prev, ...allVisibleIds])) : prev.filter(id => !allVisibleIds.includes(id)));
+  };
+  const clearSelection = () => setSelectedModelIds([]);
+
+  const handleBatchDeploy = () => {
+    const targets = models.filter(m => selectedModelIds.includes(m.id) && m.status === '已完成');
+    targets.forEach(m => handleDeployModel(m));
+  };
+  const handleBatchUndeploy = () => {
+    const targets = models.filter(m => selectedModelIds.includes(m.id));
+    targets.forEach(m => handleUndeployModel(m));
+  };
+  const handleBatchRetry = () => {
+    const targets = models.filter(m => selectedModelIds.includes(m.id) && m.deployStatus === '部署失败');
+    targets.forEach(m => handleDeployModel(m));
+  };
+  const handleBatchDelete = () => {
+    setModels(prev => prev.filter(m => !selectedModelIds.includes(m.id)));
+    clearSelection();
+  };
+
   const handleRefresh = () => {
     setIsRefreshing(true);
     setTimeout(() => setIsRefreshing(false), 1000);
@@ -382,133 +471,172 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
         </div>
       ) : (
         // 列表视图
-        <div className="border rounded-lg">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {columnSettings.name.visible && <TableHead>模型名称</TableHead>}
-                {columnSettings.version.visible && <TableHead>版本</TableHead>}
-                {columnSettings.type.visible && <TableHead>类型</TableHead>}
-                {columnSettings.accuracy.visible && <TableHead>准确率</TableHead>}
-                {columnSettings.status.visible && <TableHead>训练状态</TableHead>}
-                {columnSettings.deployStatus.visible && <TableHead>部署状态</TableHead>}
-                {columnSettings.size.visible && <TableHead>大小</TableHead>}
-                {columnSettings.createTime.visible && <TableHead>创建时间</TableHead>}
-                {columnSettings.actions.visible && <TableHead>操作</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredModels.map((model) => (
-                <TableRow key={model.id}>
-                  {columnSettings.name.visible && (
-                    <TableCell className="font-medium">{model.name}</TableCell>
-                  )}
-                  {columnSettings.version.visible && (
-                    <TableCell>{model.version}</TableCell>
-                  )}
-                  {columnSettings.type.visible && (
-                    <TableCell>{model.type}</TableCell>
-                  )}
-                  {columnSettings.accuracy.visible && (
-                    <TableCell className="text-green-600 font-medium">{model.accuracy}</TableCell>
-                  )}
-                  {columnSettings.status.visible && (
-                    <TableCell>
-                      <Badge variant={model.status === "已完成" ? "default" : "secondary"}>
-                        {model.status}
-                      </Badge>
-                    </TableCell>
-                  )}
-                  {columnSettings.deployStatus.visible && (
-                    <TableCell>
-                      <Badge 
-                        variant={
-                          model.deployStatus === "已部署" ? "default" :
-                          model.deployStatus === "部署中" ? "secondary" :
-                          model.deployStatus === "部署失败" ? "destructive" : "outline"
-                        }
-                      >
-                        {model.deployStatus}
-                      </Badge>
-                    </TableCell>
-                  )}
-                  {columnSettings.size.visible && (
-                    <TableCell>{model.size}</TableCell>
-                  )}
-                  {columnSettings.createTime.visible && (
-                    <TableCell>{model.createTime}</TableCell>
-                  )}
-                  {columnSettings.actions.visible && (
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => handleModelDetail(model)}
-                          className="text-blue-600 h-7 px-2 text-xs"
-                        >
-                          查看
-                        </Button>
-                        <Button variant="ghost" size="sm" className="text-gray-600 h-7 px-2 text-xs">
-                          编辑
-                        </Button>
-                        
-                        {/* 根据部署状态显示不同的按钮 */}
-                        {model.status === "已完成" && (
-                          <>
-                            {model.deployStatus === "未部署" && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="text-green-600 h-7 px-2 text-xs flex items-center gap-1"
-                                onClick={() => handleDeployModel(model)}
-                              >
-                                <Play className="h-3 w-3" />
-                                部署
-                              </Button>
-                            )}
-                            {model.deployStatus === "已部署" && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="text-orange-600 h-7 px-2 text-xs flex items-center gap-1"
-                                onClick={() => handleUndeployModel(model)}
-                              >
-                                <Square className="h-3 w-3" />
-                                停止
-                              </Button>
-                            )}
-                            {model.deployStatus === "部署中" && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="text-blue-600 h-7 px-2 text-xs flex items-center gap-1"
-                                disabled
-                              >
-                                <div className="animate-spin h-3 w-3 border border-blue-600 border-t-transparent rounded-full"></div>
-                                部署中
-                              </Button>
-                            )}
-                            {model.deployStatus === "部署失败" && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="text-red-600 h-7 px-2 text-xs flex items-center gap-1"
-                                onClick={() => handleDeployModel(model)}
-                              >
-                                <RefreshCw className="h-3 w-3" />
-                                重试
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <div className="p-2">
+          <VirtualTable
+            data={sortedModels}
+            height={520}
+            rowHeight={44}
+            density="normal"
+            enableColumnResize
+            enableColumnDrag
+            sortState={{ column: sortConfig.field, order: sortConfig.order }}
+            onSortChange={(column, order) => {
+              setSortConfig({ field: column as SortField, order });
+            }}
+            headerRight={
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={isAllSelected}
+                  onCheckedChange={(checked: boolean) => handleSelectAllVisible(Boolean(checked))}
+                />
+                <span className="text-xs text-gray-600">全选当前结果</span>
+                {selectedModelIds.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-600">已选 {selectedModelIds.length} 项</span>
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={handleBatchDeploy}>
+                      <Play className="h-3 w-3" /> 部署
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={handleBatchUndeploy}>
+                      <Square className="h-3 w-3" /> 停止
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={handleBatchRetry}>
+                      <RefreshCw className="h-3 w-3" /> 重试
+                    </Button>
+                    <Button variant="destructive" size="sm" className="h-7 px-2 text-xs" onClick={handleBatchDelete}>
+                      <Trash2 className="h-3 w-3" /> 删除
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clearSelection}>清空选择</Button>
+                  </div>
+                )}
+              </div>
+            }
+            freezeLeftCount={1}
+            columns={[
+              {
+                key: 'select',
+                label: '',
+                width: 48,
+                render: (_: any, row: any) => (
+                  <Checkbox
+                    checked={selectedModelIds.includes(row.id)}
+                    onCheckedChange={(checked: boolean) => handleToggleSelect(row.id, Boolean(checked))}
+                    aria-label="选择行"
+                  />
+                ),
+              },
+              columnSettings.name.visible && {
+                key: 'name',
+                label: '模型名称',
+                width: 180,
+                sortable: true,
+                render: (value: any) => <span className="font-medium">{value}</span>,
+              },
+              columnSettings.version.visible && {
+                key: 'version',
+                label: '版本',
+                width: 100,
+                sortable: true,
+              },
+              columnSettings.type.visible && {
+                key: 'type',
+                label: '类型',
+                width: 120,
+                sortable: true,
+              },
+              columnSettings.accuracy.visible && {
+                key: 'accuracy',
+                label: '准确率',
+                width: 120,
+                sortable: true,
+                render: (value: any) => {
+                  const v = typeof value === 'string' && value.endsWith('%') ? parseFloat(value) : Number(value);
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span>{Number.isFinite(v) ? `${v.toFixed(1)}%` : value}</span>
+                      {Number.isFinite(v) && (
+                        <div className="w-20">
+                          <Progress value={v} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                },
+              },
+              columnSettings.status.visible && {
+                key: 'status',
+                label: '训练状态',
+                width: 120,
+                sortable: true,
+                render: (value: any) => (
+                  <div className="flex items-center gap-2">
+                    {value === '训练中' && <Loader className="h-3 w-3 animate-spin text-blue-600" />}
+                    {value === '已训练' && <CheckCircle className="h-3 w-3 text-green-600" />}
+                    {value === '失败' && <AlertCircle className="h-3 w-3 text-red-600" />}
+                    <span>{value}</span>
+                  </div>
+                ),
+              },
+              columnSettings.deployStatus.visible && {
+                key: 'deployStatus',
+                label: '部署状态',
+                width: 120,
+                sortable: true,
+                render: (value: any, row: any) => (
+                  <div className="flex items-center gap-2">
+                    {value === '未部署' && (
+                      <Button variant="outline" size="sm" className="h-7" onClick={() => handleDeployModel(row)}>
+                        <Play className="h-3 w-3" />
+                      </Button>
+                    )}
+                    {value === '部署中' && (
+                      <div className="animate-spin h-4 w-4 border border-blue-600 border-t-transparent rounded-full"></div>
+                    )}
+                    {value === '已部署' && (
+                      <Button variant="outline" size="sm" className="h-7" onClick={() => handleUndeployModel(row)}>
+                        <Square className="h-3 w-3" />
+                      </Button>
+                    )}
+                    {value === '部署失败' && (
+                      <Button variant="destructive" size="sm" className="h-7" onClick={() => handleDeployModel(row)}>
+                        <RefreshCw className="h-3 w-3" />
+                      </Button>
+                    )}
+                    <span>{value}</span>
+                  </div>
+                ),
+              },
+              columnSettings.size.visible && {
+                key: 'size',
+                label: '大小',
+                width: 100,
+                sortable: true,
+              },
+              columnSettings.createTime.visible && {
+                key: 'createTime',
+                label: '创建时间',
+                width: 160,
+                sortable: true,
+              },
+              {
+                key: 'actions',
+                label: '操作',
+                width: 200,
+                render: (_: any, row: any) => (
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => handleModelDetail(row)}>详情</Button>
+                    <Button variant="outline" size="sm" onClick={() => onOpenModelTuning?.()}>微调</Button>
+                    <Button variant="outline" size="sm">
+                      <Download className="h-3 w-3" />
+                    </Button>
+                    <Button variant="outline" size="sm">
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={() => setModels(prev => prev.filter(m => m.id !== row.id))}>删除</Button>
+                  </div>
+                ),
+              },
+            ].filter(Boolean) as any}
+          />
         </div>
       )}
 

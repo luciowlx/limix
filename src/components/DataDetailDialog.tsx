@@ -112,25 +112,18 @@ export function DataDetailDialog({ isOpen, onClose, dataset }: DataDetailDialogP
   };
 
   const getStatusBadge = (status: string) => {
-    const variants = {
-      'normal': 'default',
-      'warning': 'secondary',
-      'error': 'destructive',
-      '成功': 'default',
-      '失败': 'destructive'
-    } as const;
-    
-    const labels = {
-      'normal': '正常',
-      'warning': '警告',
-      'error': '错误',
-      '成功': '成功',
-      '失败': '失败'
-    } as const;
+    // 统一展示为：成功/失败/导入中；兼容历史“处理中”
+    const normalized = (status || '').toLowerCase();
+    const isProcessing = normalized.includes('processing') || normalized.includes('处理中') || normalized.includes('导入中');
+    const isSuccess = normalized.includes('success') || status === '成功';
+    const isFailed = normalized.includes('failed') || status === '失败';
+
+    const variant = isSuccess ? 'default' : isProcessing ? 'secondary' : isFailed ? 'destructive' : 'outline';
+    const label = isSuccess ? '成功' : isProcessing ? '导入中' : isFailed ? '失败' : status;
 
     return (
-      <Badge variant={variants[status as keyof typeof variants]}>
-        {labels[status as keyof typeof labels] || status}
+      <Badge variant={variant as any}>
+        {label}
       </Badge>
     );
   };

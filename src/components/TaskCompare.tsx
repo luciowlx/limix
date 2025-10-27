@@ -23,7 +23,7 @@ import {
   ErrorBar,
 } from 'recharts';
 
-type TaskType = 'classification' | 'regression' | 'forecasting';
+import { TaskType, TASK_TYPES } from '../utils/taskTypes';
 
 interface CommonInfo {
   id: string;
@@ -178,9 +178,9 @@ function CausalGraphView({ graph, title }: { graph: CausalGraph; title: string }
 export const TaskCompare: React.FC<TaskCompareProps> = ({ task1, task2, onBack }) => {
   const sameType = task1.type === task2.type;
 
-  const isClassification = sameType && task1.type === 'classification';
-  const isRegression = sameType && task1.type === 'regression';
-  const isForecasting = sameType && task1.type === 'forecasting';
+  const isClassification = sameType && task1.type === TASK_TYPES.classification;
+  const isRegression = sameType && task1.type === TASK_TYPES.regression;
+  const isForecasting = sameType && task1.type === TASK_TYPES.forecasting;
 
   const clsMetrics = useMemo(() => {
     if (!isClassification) return null;

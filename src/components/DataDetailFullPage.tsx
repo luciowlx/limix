@@ -200,40 +200,14 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
     const s = status ? String(status).toLowerCase() : "";
     if (s.includes("success") || s.includes("成功")) return { cls: "bg-green-50 text-green-700 border-green-300", label: "成功" };
     if (s.includes("fail") || s.includes("失败")) return { cls: "bg-red-50 text-red-700 border-red-300", label: "失败" };
-    if (s.includes("process") || s.includes("处理中") || s.includes("running")) return { cls: "bg-yellow-50 text-yellow-700 border-yellow-300", label: "处理中" };
+    // 兼容历史“处理中”字符串，但统一显示为“导入中”
+    if (s.includes("process") || s.includes("处理中") || s.includes("running") || s.includes("导入中")) return { cls: "bg-yellow-50 text-yellow-700 border-yellow-300", label: "导入中" };
     return { cls: "bg-gray-50 text-gray-700 border-gray-300", label: status || "未知" };
   };
 
-  // LimiX 质量评分（0-100），以及分解说明（mock）
-  const computeLimixQualityScore = () => {
-    const m = getMissingAnalysisMock();
-    const missingRatio = m.missingRatio; // %
-    const uniqueAvg = getUniqueValueRatioPercent(); // %（字段平均）
-    const fieldCount = allVariables.length;
+  // 已移除：LimiX质量评分相关逻辑
 
-    const penaltyMissing = missingRatio * 1.0; // 缺失值扣分（权重 1.0）
-    const rewardUnique = (uniqueAvg - 50) * 0.2; // 唯一占比高于 50% 适度加分，低于则减分
-    const rewardFields = Math.min(5, (fieldCount / 30) * 5); // 字段数量上限 5 分（30 字段满分）
-
-    const raw = 100 - penaltyMissing + rewardUnique + rewardFields;
-    const score = Math.max(0, Math.min(100, raw));
-
-    return {
-      score: Math.round(score),
-      missingRatio,
-      uniqueAvg,
-      fieldCount,
-      penaltyMissing: Number(penaltyMissing.toFixed(1)),
-      rewardUnique: Number(rewardUnique.toFixed(1)),
-      rewardFields: Number(rewardFields.toFixed(1)),
-    };
-  };
-
-  const getLimixScoreClass = (score: number) => {
-    if (score >= 85) return "bg-green-50 text-green-700 border-green-200";
-    if (score >= 70) return "bg-yellow-50 text-yellow-700 border-yellow-200";
-    return "bg-red-50 text-red-700 border-red-200";
-  };
+  // 已移除：LimiX质量评分样式分类函数
 
   const handleCopyId = async () => {
     const id = meta.id;
@@ -536,8 +510,6 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
                   { label: "缺失值比例", value: `${m.missingRatio.toFixed(1)}%`, icon: AlertTriangle, cls: "bg-orange-50 text-orange-700 border-orange-200" },
                   { label: "唯一值占比（字段平均）", value: `${getUniqueValueRatioPercent().toFixed(1)}%`, icon: BarChart3, cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
                 ];
-                const limix = computeLimixQualityScore();
-                const scoreCls = getLimixScoreClass(limix.score);
                 return (
                   <div className="grid grid-cols-2 gap-4">
                     {tiles.map((t, idx) => (
@@ -549,29 +521,6 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
                         </div>
                       </div>
                     ))}
-                    <div className="col-span-2">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className={`rounded-lg border px-3 py-3 flex items-center cursor-help ${scoreCls}`}>
-                            <Activity className="h-5 w-5 mr-2" />
-                            <div>
-                              <div className="text-xs">LimiX质量评分</div>
-                              <div className="text-xl font-bold leading-tight">{limix.score}</div>
-                            </div>
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <div className="space-y-1">
-                            <div className="font-medium">评分分解</div>
-                            <div>基础分：100</div>
-                            <div>缺失值比例：{limix.missingRatio.toFixed(1)}%，扣分：{limix.penaltyMissing.toFixed(1)}</div>
-                            <div>唯一值占比（字段平均）：{limix.uniqueAvg.toFixed(1)}%，加分：{limix.rewardUnique.toFixed(1)}</div>
-                            <div>字段数量：{limix.fieldCount}，加分：{limix.rewardFields.toFixed(1)}</div>
-                            <div>最终评分：{limix.score}</div>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
                   </div>
                 );
               })()}

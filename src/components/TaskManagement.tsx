@@ -19,10 +19,11 @@ import {
   Cpu,
   Eye,
   RotateCcw,
-  Pause,
   Square,
   Play,
   Download,
+  Copy,
+  Trash2,
   List,
   Grid,
   ArrowUp,
@@ -36,6 +37,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { Pencil } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -73,22 +75,19 @@ import {
   CommandItem,
   CommandEmpty,
 } from './ui/command';
+import { Calendar as DateRangeCalendar } from './ui/calendar';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from './ui/table';
+import { VirtualTable } from './ui/virtual-table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import TaskCompare from './TaskCompare';
 import type { TaskCompareItem } from './TaskCompare';
+import { getAvailableActions, getCommonActionKeys } from '../utils/taskActions';
+import { TASK_TYPES, ALLOWED_TASK_TYPES, TaskType } from '../utils/taskTypes';
 
 // 模拟项目列表（后续可替换为真实项目数据）
 const mockProjects = [
@@ -99,13 +98,17 @@ const mockProjects = [
 ];
 const getProjectName = (id: string) => mockProjects.find(p => p.id === id)?.name || '未选择项目';
 
-// 任务类型定义（优化为：时序预测、分类、回归）
-type TaskType = 'forecasting' | 'classification' | 'regression';
+// 任务类型常量与类型统一（从 utils 统一导入）
+// 已改为从 ../utils/taskTypes 导入 TASK_TYPES、ALLOWED_TASK_TYPES、TaskType
+
 type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'archived';
-type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
+type TaskPriority = 'low' | 'medium' | 'high';
 type ViewMode = 'table' | 'grid';
 type SortField = 'createdAt' | 'completedAt' | 'status' | 'priority' | 'taskName';
 type SortOrder = 'asc' | 'desc';
+
+// 统一允许的模型常量，供筛选与 UI 复用
+const ALLOWED_MODELS = new Set<string>(['Limix', 'XGBoost']);
 
 // 支持多数据集选择的条目类型（新增）
 interface SelectedDatasetEntry {
@@ -146,8 +149,9 @@ interface FilterOptions {
   status: TaskStatus | 'all';
   // 新增：按项目筛选（使用项目ID，'all' 表示全部项目）
   projectId?: string | 'all';
-  datasetName: string;
-  modelName: string;
+  // 修改：数据集和模型筛选支持多选
+  datasetNames: string[];
+  modelNames: string[];
   priority: TaskPriority | 'all';
   dateRange: {
     start: string;
@@ -188,7 +192,8 @@ interface DatasetVersion {
 }
 
 // 输出配置：分类任务平均方式
-type AverageMethod = 'micro' | 'macro' | 'samples' | 'weighted' | 'binary' | 'none';
+// 按要求：将选项 none 调整为 acc（兼容旧配置在预填时自动映射）
+type AverageMethod = 'micro' | 'macro' | 'samples' | 'weighted' | 'binary' | 'acc';
 
 // 输出配置接口
 interface OutputConfig {
@@ -215,7 +220,9 @@ interface OutputConfig {
       precision: { enabled: boolean; average: AverageMethod };
       recall: { enabled: boolean; average: AverageMethod };
       f1: { enabled: boolean; average: AverageMethod };
+      accuracy: { enabled: boolean; average: AverageMethod };
       rocAuc: { enabled: boolean; average: AverageMethod };
+      customMetricCode: string;
     };
     visualizations: {
       rocCurve: boolean;              // ROC 曲线（支持 macro/micro）
@@ -297,7 +304,7 @@ interface FormData {
   // 新增：输出配置（按任务类型）
   outputConfig: OutputConfig;
   // 运行资源类型
-  resourceType: 'cpu' | 'gpu' | 'auto';
+  resourceType: 'cpu' | 'gpu' | 'npu';
   resourceConfig: {
     cores: number;
     memory: number; // GB
@@ -325,7 +332,7 @@ interface FormData {
   // 全屏模式状态（创建任务弹窗）
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
   // 任务对比预览：示例类型选择（分类/回归/时序预测）
-  const [compareDemoType, setCompareDemoType] = useState<TaskType>('classification');
+  const [compareDemoType, setCompareDemoType] = useState<TaskType>(TASK_TYPES.classification);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   // 新增：创建成功后用于高亮并滚动定位的任务ID
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
@@ -350,22 +357,37 @@ interface FormData {
     taskName: ''
   });
   
+  // 新增：任务操作加载态、操作日志与状态动画
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [actionLogs, setActionLogs] = useState<Array<{ ts: number; taskId: string; action: string; success: boolean; message?: string }>>([]);
+  const [statusAnimTaskId, setStatusAnimTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    if (statusAnimTaskId) {
+      const timer = setTimeout(() => setStatusAnimTaskId(null), 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [statusAnimTaskId]);
+  
   // 筛选状态
   const [filters, setFilters] = useState<FilterOptions>({
     taskType: 'all',
     status: 'all',
     projectId: 'all',
-    datasetName: '',
-    modelName: '',
+    datasetNames: [],
+    modelNames: [],
     priority: 'all',
     dateRange: { start: '', end: '' },
     searchQuery: ''
   });
 
+  // 多选下拉搜索词
+  const [datasetFilterQuery, setDatasetFilterQuery] = useState('');
+  const [modelFilterQuery, setModelFilterQuery] = useState('');
+
   // 任务创建表单状态
   const [formData, setFormData] = useState<FormData>({
     taskName: '',
-    taskType: 'forecasting',
+    taskType: TASK_TYPES.forecasting,
     projectId: '',
     datasetName: '',
   datasetVersion: '',
@@ -409,8 +431,8 @@ interface FormData {
           mae: true,
           mape: true,
           r2: true,
-          relDeviationPercents: [10, 20],
-          absDeviationValues: [10, 20],
+          relDeviationPercents: [10],
+          absDeviationValues: [10],
           customMetrics: []
         },
         visualizations: {
@@ -425,7 +447,9 @@ interface FormData {
           precision: { enabled: true, average: 'binary' },
           recall: { enabled: true, average: 'binary' },
           f1: { enabled: true, average: 'macro' },
-          rocAuc: { enabled: true, average: 'macro' }
+          accuracy: { enabled: true, average: 'acc' },
+          rocAuc: { enabled: true, average: 'macro' },
+          customMetricCode: ''
         },
         visualizations: {
           rocCurve: true,
@@ -440,8 +464,8 @@ interface FormData {
           mae: true,
           mape: true,
           r2: true,
-          relDeviationPercents: [10, 20],
-          absDeviationValues: [10, 20],
+          relDeviationPercents: [10],
+          absDeviationValues: [10],
           customMetrics: []
         },
         visualizations: {
@@ -452,7 +476,7 @@ interface FormData {
         }
       }
     },
-    resourceType: 'auto',
+    resourceType: 'cpu',
     resourceConfig: {
       cores: 4,
       memory: 8,
@@ -473,10 +497,10 @@ interface FormData {
       subsample: 0.8,
       colsample_bytree: 0.8,
     };
-    if (formData.taskType === 'forecasting') {
+    if (formData.taskType === TASK_TYPES.forecasting) {
       return {
         mode: 'json',
-        taskType: 'forecasting',
+        taskType: TASK_TYPES.forecasting,
         forecasting: {
           timeColumn: formData.forecastingConfig.timeColumn || 'timestamp',
           contextLength: formData.forecastingConfig.contextLength || 24,
@@ -490,10 +514,10 @@ interface FormData {
         hyperparameters: baseHyper,
       };
     }
-    if (formData.taskType === 'classification') {
+    if (formData.taskType === TASK_TYPES.classification) {
       return {
         mode: 'json',
-        taskType: 'classification',
+        taskType: TASK_TYPES.classification,
         classification: {
           trainRatio: formData.classificationConfig.trainRatio,
           testRatio: formData.classificationConfig.testRatio,
@@ -506,7 +530,7 @@ interface FormData {
     // regression
     return {
       mode: 'json',
-      taskType: 'regression',
+      taskType: TASK_TYPES.regression,
       regression: {
         trainRatio: formData.regressionConfig.trainRatio,
         testRatio: formData.regressionConfig.testRatio,
@@ -553,7 +577,7 @@ interface FormData {
         const taskType = (parsed.taskType as TaskType) || formData.taskType;
         const output = parsed.output;
         if (output && typeof output === 'object' && !Array.isArray(output)) {
-          if (taskType === 'forecasting') {
+          if (taskType === TASK_TYPES.forecasting) {
             handleInputChange('outputConfig', {
               ...formData.outputConfig,
               forecasting: {
@@ -575,16 +599,18 @@ interface FormData {
                 },
               },
             });
-          } else if (taskType === 'classification') {
+          } else if (taskType === TASK_TYPES.classification) {
             const def = formData.outputConfig.classification.metrics;
             handleInputChange('outputConfig', {
               ...formData.outputConfig,
               classification: {
                 metrics: {
-                  precision: { enabled: Boolean(output.metrics?.precision?.enabled), average: (output.metrics?.precision?.average as any) || def.precision.average },
-                  recall: { enabled: Boolean(output.metrics?.recall?.enabled), average: (output.metrics?.recall?.average as any) || def.recall.average },
-                  f1: { enabled: Boolean(output.metrics?.f1?.enabled), average: (output.metrics?.f1?.average as any) || def.f1.average },
-                  rocAuc: { enabled: Boolean(output.metrics?.rocAuc?.enabled), average: (output.metrics?.rocAuc?.average as any) || def.rocAuc.average },
+                  precision: { enabled: Boolean(output.metrics?.precision?.enabled), average: (((output.metrics?.precision?.average === 'none') ? 'acc' : output.metrics?.precision?.average) as AverageMethod) || def.precision.average },
+                  recall: { enabled: Boolean(output.metrics?.recall?.enabled), average: (((output.metrics?.recall?.average === 'none') ? 'acc' : output.metrics?.recall?.average) as AverageMethod) || def.recall.average },
+                  f1: { enabled: Boolean(output.metrics?.f1?.enabled), average: (((output.metrics?.f1?.average === 'none') ? 'acc' : output.metrics?.f1?.average) as AverageMethod) || def.f1.average },
+                  accuracy: { enabled: Boolean(output.metrics?.accuracy?.enabled), average: (((output.metrics?.accuracy?.average === 'none') ? 'acc' : output.metrics?.accuracy?.average) as AverageMethod) || def.accuracy.average },
+                  rocAuc: { enabled: Boolean(output.metrics?.rocAuc?.enabled), average: (((output.metrics?.rocAuc?.average === 'none') ? 'acc' : output.metrics?.rocAuc?.average) as AverageMethod) || def.rocAuc.average },
+                  customMetricCode: typeof output.metrics?.customMetricCode === 'string' ? output.metrics.customMetricCode : (def as any).customMetricCode ?? ''
                 },
                 visualizations: {
                   rocCurve: Boolean(output.visualizations?.rocCurve),
@@ -593,7 +619,7 @@ interface FormData {
                 },
               },
             });
-          } else if (taskType === 'regression') {
+          } else if (taskType === TASK_TYPES.regression) {
             handleInputChange('outputConfig', {
               ...formData.outputConfig,
               regression: {
@@ -753,7 +779,7 @@ interface FormData {
 
   // 当公共字段（availableFields）变化时，校正或自动预填时间列
   useEffect(() => {
-    if (formData.taskType !== 'forecasting') return;
+    if (formData.taskType !== TASK_TYPES.forecasting) return;
     const fields = formData.availableFields || [];
     const current = formData.forecastingConfig?.timeColumn || '';
     // 如果当前时间列不在公共字段中，则清空
@@ -846,69 +872,21 @@ interface FormData {
       description: 'limix自研结构化数据大模型，支持多种任务',
       accuracy: '95.2%',
       size: '78.9MB',
-      supportedTasks: ['classification', 'regression', 'forecasting'],
+      supportedTasks: [TASK_TYPES.classification, TASK_TYPES.regression, TASK_TYPES.forecasting],
       trainingTime: '自动调参',
       features: ['模型集成', '无需专业知识']
     },
     { 
       id: 'MODEL-001', 
-      name: 'XGBoost分类器', 
-      type: '三方模型', 
+      name: 'XGBoost', 
+      type: '梯度提升', 
       status: 'available',
-      description: '基于梯度提升的高性能分类算法，适用于结构化数据分类任务',
+      description: '基于梯度提升的高性能算法，适用于结构化数据',
       accuracy: '92.5%',
       size: '15.2MB',
-      supportedTasks: ['classification', 'forecasting'],
+      supportedTasks: [TASK_TYPES.classification, TASK_TYPES.forecasting],
       trainingTime: '~30分钟',
       features: ['高准确率', '快速训练', '特征重要性分析']
-    },
-    { 
-      id: 'MODEL-002', 
-      name: 'LightGBM回归器', 
-      type: '三方模型', 
-      status: 'available',
-      description: '轻量级梯度提升框架，专为回归任务优化',
-      accuracy: '89.3%',
-      size: '8.7MB',
-      supportedTasks: ['regression', 'forecasting'],
-      trainingTime: '~20分钟',
-      features: ['内存效率高', '训练速度快', '支持类别特征']
-    },
-    { 
-      id: 'MODEL-003', 
-      name: '神经网络模型', 
-      type: '三方模型', 
-      status: 'available',
-      description: '深度学习神经网络，适用于复杂模式识别',
-      accuracy: '94.1%',
-      size: '45.6MB',
-      supportedTasks: ['classification', 'regression', 'forecasting'],
-      trainingTime: '~2小时',
-      features: ['高精度', '强泛化能力', '支持复杂特征']
-    },
-    { 
-      id: 'MODEL-004', 
-      name: '随机森林', 
-      type: '三方模型', 
-      status: 'available',
-      description: '集成学习算法，通过多个决策树提高预测准确性',
-      accuracy: '87.8%',
-      size: '12.3MB',
-      supportedTasks: ['classification', 'regression'],
-      trainingTime: '~45分钟',
-      features: ['抗过拟合', '特征选择', '处理缺失值']
-    },
-    { 
-      id: 'MODEL-005', 
-      name: 'AutoGluon-Tabular', 
-      type: '三方模型', 
-      status: 'available',
-      description: 'AutoML自动机器学习框架，自动选择最优模型',
-      accuracy: '95.2%',
-      size: '78.9MB',
-      supportedTasks: ['classification', 'regression', 'forecasting'],
-      trainingTime: '~3小时',
-      features: ['自动调参', '模型集成', '无需专业知识']
     }
   ]);
 
@@ -917,7 +895,7 @@ interface FormData {
     {
       id: 'TASK-001',
       taskName: '销售数据预测模型训练',
-      taskType: 'forecasting',
+      taskType: TASK_TYPES.forecasting,
       projectId: 'proj_003',
       datasetName: '销售数据集',
       datasetVersion: 'v2.1',
@@ -935,7 +913,7 @@ interface FormData {
     {
       id: 'TASK-002',
       taskName: '用户行为分析',
-      taskType: 'classification',
+      taskType: TASK_TYPES.classification,
       projectId: 'proj_004',
       datasetName: '用户行为数据',
       datasetVersion: 'v1.3',
@@ -951,12 +929,12 @@ interface FormData {
     {
       id: 'TASK-003',
       taskName: '产品推荐算法优化',
-      taskType: 'classification',
+      taskType: TASK_TYPES.classification,
       projectId: 'proj_001',
       datasetName: '产品数据集',
       datasetVersion: 'v3.0',
-      modelName: 'DeepLearning',
-      priority: 'urgent',
+      modelName: 'XGBoost',
+      priority: 'high',
       status: 'pending',
       progress: 0,
       createdAt: '2024-01-16T14:20:00Z',
@@ -967,7 +945,7 @@ interface FormData {
     {
       id: 'TASK-004',
       taskName: '客户流失预测',
-      taskType: 'regression',
+      taskType: TASK_TYPES.regression,
       projectId: 'proj_004',
       datasetName: '客户数据集',
       datasetVersion: 'v1.8',
@@ -985,7 +963,7 @@ interface FormData {
     {
       id: 'TASK-005',
       taskName: '库存优化模型',
-      taskType: 'forecasting',
+      taskType: TASK_TYPES.forecasting,
       projectName: '电力能源预测',
       datasetName: '库存数据',
       datasetVersion: 'v2.5',
@@ -1004,7 +982,7 @@ interface FormData {
     {
       id: 'TASK-006',
       taskName: '多数据集联合预测实验',
-      taskType: 'forecasting',
+      taskType: TASK_TYPES.forecasting,
       projectId: 'proj_002',
       datasetName: '生产质量数据集',
       datasetVersion: 'v3.0',
@@ -1012,7 +990,7 @@ interface FormData {
         { id: 'DATA-2025-001', name: '生产质量数据集', version: 'v3.0' },
         { id: 'DATA-2025-002', name: '客户行为数据集', version: 'v2.0' }
       ],
-      modelName: 'AutoGluon-Tabular',
+      modelName: 'Limix',
       priority: 'high',
       status: 'running',
       progress: 30,
@@ -1023,10 +1001,33 @@ interface FormData {
     }
   ]);
 
+  // 计算筛选选项：数据集与模型
+  const datasetOptions = useMemo(() => {
+    const names = new Set<string>();
+    availableDatasets.forEach(d => { if (d.name) names.add(d.name); });
+    tasks.forEach(t => {
+      if (t.datasetName) names.add(t.datasetName);
+      t.datasets?.forEach(sd => { if (sd.name) names.add(sd.name); });
+    });
+    return Array.from(names);
+  }, [availableDatasets, tasks]);
+
+  const modelOptions = useMemo(() => {
+    const names = new Set<string>();
+    availableModels.forEach(m => {
+      if (m.status !== 'unavailable' && m.name && ALLOWED_MODELS.has(m.name)) names.add(m.name);
+    });
+    tasks.forEach(t => {
+      if (t.modelName && ALLOWED_MODELS.has(t.modelName)) names.add(t.modelName);
+    });
+    return Array.from(names);
+  }, [availableModels, tasks]);
+
   // 同步外部对话框状态
   useEffect(() => {
     setIsCreateTaskOpen(isCreateTaskDialogOpen);
   }, [isCreateTaskDialogOpen]);
+
 
   // 状态颜色和图标映射
   const getStatusConfig = (status: TaskStatus) => {
@@ -1046,19 +1047,18 @@ interface FormData {
     const configs = {
       low: { color: 'bg-gray-100 text-gray-800', label: '低' },
       medium: { color: 'bg-blue-100 text-blue-800', label: '中' },
-      high: { color: 'bg-orange-100 text-orange-800', label: '高' },
-      urgent: { color: 'bg-red-100 text-red-800', label: '紧急' }
-    };
+      high: { color: 'bg-orange-100 text-orange-800', label: '高' }
+    } as const;
     return configs[priority];
   };
 
   // 任务类型映射（中文标签）
   const getTaskTypeLabel = (type: TaskType) => {
-    const labels = {
-      forecasting: '时序预测',
-      classification: '分类',
-      regression: '回归',
-    } as const;
+    const labels: Record<TaskType, string> = {
+      [TASK_TYPES.forecasting]: '时序预测',
+      [TASK_TYPES.classification]: '分类',
+      [TASK_TYPES.regression]: '回归',
+    };
     return labels[type];
   };
 
@@ -1086,14 +1086,24 @@ interface FormData {
         return false;
       }
 
-      // 数据集名称筛选
-      if (filters.datasetName && !task.datasetName.toLowerCase().includes(filters.datasetName.toLowerCase())) {
-        return false;
+      // 数据集名称筛选（多选）
+      if (filters.datasetNames && filters.datasetNames.length > 0) {
+        const selected = new Set(filters.datasetNames.map(n => n.toLowerCase()));
+        const taskDatasets = [
+          task.datasetName,
+          ...(task.datasets?.map(ds => ds.name) || [])
+        ]
+          .filter(Boolean)
+          .map(n => n.toLowerCase());
+        const match = taskDatasets.some(n => selected.has(n));
+        if (!match) return false;
       }
 
-      // 模型名称筛选
-      if (filters.modelName && !task.modelName.toLowerCase().includes(filters.modelName.toLowerCase())) {
-        return false;
+      // 模型名称筛选（多选）
+      if (filters.modelNames && filters.modelNames.length > 0) {
+        const selected = new Set(filters.modelNames.map(n => n.toLowerCase()));
+        const model = task.modelName?.toLowerCase();
+        if (!model || !selected.has(model)) return false;
       }
 
       // 所属项目筛选（优先按ID匹配，兼容仅有名称的旧数据）
@@ -1120,6 +1130,8 @@ interface FormData {
       if (filters.dateRange.end) {
         const taskDate = new Date(task.createdAt);
         const endDate = new Date(filters.dateRange.end);
+        // 使结束日期为当天的 23:59:59.999，保证筛选为“包含结束当天”
+        endDate.setHours(23, 59, 59, 999);
         if (taskDate > endDate) return false;
       }
 
@@ -1144,7 +1156,7 @@ interface FormData {
           bValue = b.status;
           break;
         case 'priority':
-          const priorityOrder = { low: 1, medium: 2, high: 3, urgent: 4 };
+          const priorityOrder = { low: 1, medium: 2, high: 3 };
           aValue = priorityOrder[a.priority];
           bValue = priorityOrder[b.priority];
           break;
@@ -1222,7 +1234,7 @@ interface FormData {
     // 超参数/任务配置验证
     if (formData.hyperparameterMode === 'page') {
       // 根据任务类型校验对应的页面配置
-      if (formData.taskType === 'forecasting') {
+      if (formData.taskType === TASK_TYPES.forecasting) {
         const fc = formData.forecastingConfig;
         // 时间列必选且必须来自公共字段
         if (!fc || !String(fc.timeColumn || '').trim()) {
@@ -1242,7 +1254,7 @@ interface FormData {
         if (!fc || !String(fc.startTime || '').trim()) {
           errors.forecastingStartTime = '请选择预测开始时间';
         }
-      } else if (formData.taskType === 'classification') {
+      } else if (formData.taskType === TASK_TYPES.classification) {
         const cc = formData.classificationConfig;
         if (!cc) {
           errors.classificationSplit = '请完善分类任务的训练/测试集配置';
@@ -1252,7 +1264,7 @@ interface FormData {
             errors.classificationSplit = '训练/测试比例必须为正且相加等于100%';
           }
         }
-      } else if (formData.taskType === 'regression') {
+      } else if (formData.taskType === TASK_TYPES.regression) {
         const rc = formData.regressionConfig;
         if (!rc) {
           errors.regressionSplit = '请完善回归任务的训练/测试集配置';
@@ -1370,10 +1382,10 @@ interface FormData {
                 if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
                   const taskType = formData.taskType;
                   const outputByType = (() => {
-                    if (taskType === 'forecasting') return formData.outputConfig.forecasting;
-                    if (taskType === 'classification') return formData.outputConfig.classification;
-                    return formData.outputConfig.regression;
-                  })();
+                      if (taskType === TASK_TYPES.forecasting) return formData.outputConfig.forecasting;
+                      if (taskType === TASK_TYPES.classification) return formData.outputConfig.classification;
+                      return formData.outputConfig.regression;
+                    })();
                   const merged = {
                     ...parsed,
                     output: parsed.output ?? outputByType,
@@ -1388,17 +1400,17 @@ interface FormData {
             })()
           : (() => {
               const base: any = { mode: 'page', taskType: formData.taskType };
-              if (formData.taskType === 'forecasting') {
+              if (formData.taskType === TASK_TYPES.forecasting) {
                 // 兼容后端旧字段：mainVariableFile 取 mainVariableFiles[0]
                 base.forecasting = {
                   ...formData.forecastingConfig,
                   mainVariableFile: formData.forecastingConfig?.mainVariableFiles?.[0] || undefined,
                 };
                 base.output = { ...formData.outputConfig.forecasting };
-              } else if (formData.taskType === 'classification') {
+              } else if (formData.taskType === TASK_TYPES.classification) {
                 base.classification = { ...formData.classificationConfig };
                 base.output = { ...formData.outputConfig.classification };
-              } else if (formData.taskType === 'regression') {
+              } else if (formData.taskType === TASK_TYPES.regression) {
                 base.regression = { ...formData.regressionConfig };
                 base.output = { ...formData.outputConfig.regression };
               }
@@ -1483,8 +1495,8 @@ interface FormData {
                   if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
                     const taskType = formData.taskType;
                     const outputByType = (() => {
-                      if (taskType === 'forecasting') return formData.outputConfig.forecasting;
-                      if (taskType === 'classification') return formData.outputConfig.classification;
+                      if (taskType === TASK_TYPES.forecasting) return formData.outputConfig.forecasting;
+                      if (taskType === TASK_TYPES.classification) return formData.outputConfig.classification;
                       return formData.outputConfig.regression;
                     })();
                     const merged = {
@@ -1500,13 +1512,13 @@ interface FormData {
               })()
             : (() => {
                 const base: any = { mode: 'page', taskType: formData.taskType };
-                if (formData.taskType === 'forecasting') {
+                if (formData.taskType === TASK_TYPES.forecasting) {
                   base.forecasting = { ...formData.forecastingConfig };
                   base.output = { ...formData.outputConfig.forecasting };
-                } else if (formData.taskType === 'classification') {
+                } else if (formData.taskType === TASK_TYPES.classification) {
                   base.classification = { ...formData.classificationConfig };
                   base.output = { ...formData.outputConfig.classification };
-                } else if (formData.taskType === 'regression') {
+                } else if (formData.taskType === TASK_TYPES.regression) {
                   base.regression = { ...formData.regressionConfig };
                   base.output = { ...formData.outputConfig.regression };
                 }
@@ -1648,8 +1660,8 @@ interface FormData {
       taskType: 'all',
       status: 'all',
       projectId: 'all',
-      datasetName: '',
-      modelName: '',
+      datasetNames: [],
+      modelNames: [],
       priority: 'all',
       dateRange: { start: '', end: '' },
       searchQuery: ''
@@ -1776,7 +1788,7 @@ interface FormData {
           outputConfig: (() => {
             const current = prev.outputConfig;
             if (parsedOutput && typeof parsedOutput === 'object' && !Array.isArray(parsedOutput)) {
-              if (task.taskType === 'forecasting') {
+              if (task.taskType === TASK_TYPES.forecasting) {
                 return {
                   ...current,
                   forecasting: {
@@ -1804,16 +1816,18 @@ interface FormData {
                     },
                   },
                 };
-              } else if (task.taskType === 'classification') {
+              } else if (task.taskType === TASK_TYPES.classification) {
                 const def = current.classification.metrics;
                 return {
                   ...current,
                   classification: {
                     metrics: {
-                      precision: { enabled: Boolean(parsedOutput.metrics?.precision?.enabled ?? def.precision.enabled), average: (parsedOutput.metrics?.precision?.average as AverageMethod) || def.precision.average },
-                      recall: { enabled: Boolean(parsedOutput.metrics?.recall?.enabled ?? def.recall.enabled), average: (parsedOutput.metrics?.recall?.average as AverageMethod) || def.recall.average },
-                      f1: { enabled: Boolean(parsedOutput.metrics?.f1?.enabled ?? def.f1.enabled), average: (parsedOutput.metrics?.f1?.average as AverageMethod) || def.f1.average },
-                      rocAuc: { enabled: Boolean(parsedOutput.metrics?.rocAuc?.enabled ?? def.rocAuc.enabled), average: (parsedOutput.metrics?.rocAuc?.average as AverageMethod) || def.rocAuc.average },
+                      precision: { enabled: Boolean(parsedOutput.metrics?.precision?.enabled ?? def.precision.enabled), average: (((parsedOutput.metrics?.precision?.average === 'none') ? 'acc' : parsedOutput.metrics?.precision?.average) as AverageMethod) || def.precision.average },
+                      recall: { enabled: Boolean(parsedOutput.metrics?.recall?.enabled ?? def.recall.enabled), average: (((parsedOutput.metrics?.recall?.average === 'none') ? 'acc' : parsedOutput.metrics?.recall?.average) as AverageMethod) || def.recall.average },
+                      f1: { enabled: Boolean(parsedOutput.metrics?.f1?.enabled ?? def.f1.enabled), average: (((parsedOutput.metrics?.f1?.average === 'none') ? 'acc' : parsedOutput.metrics?.f1?.average) as AverageMethod) || def.f1.average },
+                      accuracy: { enabled: Boolean(parsedOutput.metrics?.accuracy?.enabled ?? def.accuracy.enabled), average: (((parsedOutput.metrics?.accuracy?.average === 'none') ? 'acc' : parsedOutput.metrics?.accuracy?.average) as AverageMethod) || def.accuracy.average },
+                      rocAuc: { enabled: Boolean(parsedOutput.metrics?.rocAuc?.enabled ?? def.rocAuc.enabled), average: (((parsedOutput.metrics?.rocAuc?.average === 'none') ? 'acc' : parsedOutput.metrics?.rocAuc?.average) as AverageMethod) || def.rocAuc.average },
+                      customMetricCode: typeof parsedOutput.metrics?.customMetricCode === 'string' ? parsedOutput.metrics.customMetricCode : def.customMetricCode
                     },
                     visualizations: {
                       rocCurve: Boolean(parsedOutput.visualizations?.rocCurve ?? current.classification.visualizations.rocCurve),
@@ -1822,7 +1836,7 @@ interface FormData {
                     },
                   },
                 };
-              } else if (task.taskType === 'regression') {
+              } else if (task.taskType === TASK_TYPES.regression) {
                 return {
                   ...current,
                   regression: {
@@ -1854,7 +1868,7 @@ interface FormData {
             }
             return current;
           })(),
-          resourceType: 'auto',
+          resourceType: 'cpu',
           resourceConfig: { cores: 4, memory: 8, maxRunTime: 120 },
         };
       });
@@ -1865,7 +1879,7 @@ interface FormData {
     }
     
     // 对于需要确认的操作，显示确认对话框
-    if (['start', 'cancel', 'archive', 'retry'].includes(action.trim())) {
+    if (['start', 'stop', 'archive', 'retry', 'delete'].includes(action.trim())) {
       setConfirmDialog({
         isOpen: true,
         action: action.trim(),
@@ -1879,45 +1893,102 @@ interface FormData {
   };
 
   // 执行实际的任务操作
-  const executeTaskAction = (action: string, taskId: string) => {
-    console.log(`执行操作: ${action}, 任务ID: ${taskId}`);
-    // 这里可以添加具体的操作逻辑
-    if (action === 'start') {
-      // 将任务状态更新为运行中，隐藏编辑按钮
-      setTasks(prev => prev.map(t => {
-        if (t.id !== taskId) return t;
-        return {
-          ...t,
-          status: 'running',
-          // 初始进度（模拟），确保表格显示进度条
-          progress: t.progress !== undefined ? t.progress : 5,
-        };
-      }));
+  const performNetworkAction = async (action: string, taskId: string) => {
+    // 模拟网络请求耗时与失败
+    await new Promise(resolve => setTimeout(resolve, 600));
+    const failRate = 0.15; // 15% 失败率模拟
+    if (Math.random() < failRate) {
+      throw new Error('网络请求失败，请稍后重试');
     }
-    if (action === 'pause') {
-      // 简单模拟暂停为挂起（回到待执行），以便再次“开始”
-      setTasks(prev => prev.map(t => {
-        if (t.id !== taskId) return t;
-        return {
-          ...t,
-          status: 'pending',
-        };
-      }));
+  };
+
+  const exportTask = (task: Task) => {
+    try {
+      const payload = {
+        id: task.id,
+        taskName: task.taskName,
+        status: task.status,
+        projectId: task.projectId,
+        datasetName: task.datasetName,
+        datasetVersion: task.datasetVersion,
+        modelName: task.modelName,
+        createdAt: task.createdAt,
+        completedAt: task.completedAt ?? null,
+        description: task.description ?? '',
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `task_${task.id}_details.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      toast.error('导出失败');
     }
-    if (action === 'cancel') {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'cancelled' } : t));
+  };
+
+  const executeTaskAction = async (action: string, taskId: string) => {
+    setLoadingAction(`${taskId}:${action}`);
+    try {
+      await performNetworkAction(action, taskId);
+      if (action === 'start') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'running', progress: t.progress !== undefined ? t.progress : 5 } : t));
+        setStatusAnimTaskId(taskId);
+        toast.success('任务已开始');
+      } else if (action === 'stop') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'cancelled' } : t));
+        setStatusAnimTaskId(taskId);
+        toast.success('任务已停止');
+      } else if (action === 'cancel') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'cancelled' } : t));
+        setStatusAnimTaskId(taskId);
+        toast.success('任务已取消');
+      } else if (action === 'retry') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'pending', progress: undefined } : t));
+        setStatusAnimTaskId(taskId);
+        toast.success('任务已进入排队');
+      } else if (action === 'archive') {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'archived' } : t));
+        setStatusAnimTaskId(taskId);
+        toast.success('任务已归档');
+      } else if (action === 'delete') {
+        setTasks(prev => prev.filter(t => t.id !== taskId));
+        toast.success('任务已删除');
+      } else if (action === 'copy') {
+        const source = tasks.find(t => t.id === taskId);
+        if (source) {
+          const newId = `${source.id}-COPY-${Math.floor(Math.random() * 1000)}`;
+          const newTask: Task = {
+            ...source,
+            id: newId,
+            taskName: `${source.taskName}（副本）`,
+            status: 'pending',
+            progress: undefined,
+            createdAt: new Date().toISOString(),
+            completedAt: undefined,
+          };
+          setTasks(prev => [newTask, ...prev]);
+          setHighlightTaskId(newId);
+          toast.success('已创建任务副本');
+        }
+      } else if (action === 'export') {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) exportTask(task);
+        toast.success('已导出任务详情');
+      }
+      setActionLogs(prev => [...prev, { ts: Date.now(), taskId, action, success: true }]);
+    } catch (err: any) {
+      const msg = err?.message || '操作失败';
+      toast.error(msg);
+      setActionLogs(prev => [...prev, { ts: Date.now(), taskId, action, success: false, message: msg }]);
+    } finally {
+      setLoadingAction(null);
+      setConfirmDialog({ isOpen: false, action: '', taskId: '', taskName: '' });
     }
-    if (action === 'retry') {
-      // 失败或取消的任务重试为待执行
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'pending' } : t));
-    }
-    // 关闭确认对话框
-    setConfirmDialog({
-      isOpen: false,
-      action: '',
-      taskId: '',
-      taskName: ''
-    });
   };
 
   // 取消确认操作
@@ -1936,47 +2007,15 @@ interface FormData {
     // 这里可以添加具体的批量操作逻辑
   };
 
-  // 获取可用操作按钮
-  const getAvailableActions = (task: Task): Array<{ key: string; label: string; icon: any }> => {
-    const actions: Array<{ key: string; label: string; icon: any }> = [];
-    
-    actions.push({ key: 'view', label: '查看详情', icon: Eye });
-    // 编辑任务：确保失败任务可编辑，其他非运行中状态也可编辑
-    if (task.status === 'failed' || task.status === 'pending' || task.status === 'cancelled' || task.status === 'completed') {
-      actions.push({ key: 'edit', label: '编辑任务', icon: Pencil });
-    }
-    
-    if (task.status === 'failed' || task.status === 'cancelled') {
-      actions.push({ key: 'retry', label: '重试', icon: RotateCcw });
-    }
-    
-    if (task.status === 'running') {
-      actions.push({ key: 'pause', label: '暂停', icon: Pause });
-      actions.push({ key: 'stop', label: '终止', icon: Square });
-    }
-    
-    if (task.status === 'pending') {
-      actions.push({ key: 'start', label: '开始', icon: Play });
-      actions.push({ key: 'cancel', label: '取消', icon: XCircle });
-    }
-    
-    if (task.status === 'completed' || task.status === 'failed') {
-      actions.push({ key: 'export', label: '导出', icon: Download });
-    }
-    
-    if (task.status !== 'archived') {
-      actions.push({ key: 'archive', label: '归档', icon: Archive });
-    }
-    
-    return actions;
-  };
+  // 获取可用操作按钮 & 常用操作键已迁移到共享工具（src/utils/taskActions.ts）
+  // 详情与列表页统一调用 getAvailableActions / getCommonActionKeys。
 
   const filteredTasks = getFilteredAndSortedTasks();
 
   // 示例对比数据（分类任务）
   const taskCompareDemoA: TaskCompareItem = {
     info: { id: 'TC-A', name: '分类任务 A', dataset: 'CreditRisk v1.0', model: 'AutoGluon (v0.8)' },
-    type: 'classification' as const,
+    type: TASK_TYPES.classification,
     metrics: {
       accuracy: 0.86,
       precision: 0.83,
@@ -2017,7 +2056,7 @@ interface FormData {
 
   const taskCompareDemoB: TaskCompareItem = {
     info: { id: 'TC-B', name: '分类任务 B', dataset: 'CreditRisk v1.0', model: 'LimX (v1.2)' },
-    type: 'classification' as const,
+    type: TASK_TYPES.classification,
     metrics: {
       accuracy: 0.90,
       precision: 0.89,
@@ -2059,7 +2098,7 @@ interface FormData {
   // 示例对比数据（回归任务）
   const taskCompareRegA: TaskCompareItem = {
     info: { id: 'TR-A', name: '回归任务 A', dataset: 'HousePrice v2.0', model: 'XGBoostRegressor (v1.0)' },
-    type: 'regression' as const,
+    type: TASK_TYPES.regression,
     metrics: {
       mse: 0.024,
       rmse: 0.155,
@@ -2094,7 +2133,7 @@ interface FormData {
 
   const taskCompareRegB: TaskCompareItem = {
     info: { id: 'TR-B', name: '回归任务 B', dataset: 'HousePrice v2.0', model: 'LightGBMRegressor (v3.2)' },
-    type: 'regression' as const,
+    type: TASK_TYPES.regression,
     metrics: {
       mse: 0.020,
       rmse: 0.141,
@@ -2134,7 +2173,7 @@ interface FormData {
   });
   const taskCompareFctA: TaskCompareItem = {
     info: { id: 'TF-A', name: '时序预测任务 A', dataset: 'EnergyLoad v1.0', model: 'Prophet (v1.1)' },
-    type: 'forecasting' as const,
+    type: TASK_TYPES.forecasting,
     metrics: (() => {
       const series = forecastSeriesBase.map((a, t) => ({ t, actual: a, predicted: a * (1 + ((Math.random() - 0.5) * 0.06)) }));
       const errors = series.map(p => Math.abs(p.predicted - p.actual));
@@ -2171,7 +2210,7 @@ interface FormData {
 
   const taskCompareFctB: TaskCompareItem = {
     info: { id: 'TF-B', name: '时序预测任务 B', dataset: 'EnergyLoad v1.0', model: 'AutoTS (v0.6)' },
-    type: 'forecasting' as const,
+    type: TASK_TYPES.forecasting,
     metrics: (() => {
       const series = forecastSeriesBase.map((a, t) => ({ t, actual: a, predicted: a * (1 + ((Math.random() - 0.5) * 0.04)) }));
       const errors = series.map(p => Math.abs(p.predicted - p.actual));
@@ -2211,28 +2250,6 @@ interface FormData {
       {/* 操作栏 */}
       <div className="flex justify-end items-center">
         <div className="flex items-center space-x-3">
-          {/* 任务对比预览按钮，置于筛选按钮左侧 */}
-          <Button
-            size="sm"
-            onClick={() => setIsCompareDemoOpen(true)}
-            className="flex items-center space-x-2"
-          >
-            <GitCompare className="h-4 w-4" />
-            <span>任务对比预览</span>
-          </Button>
-
-          {/* 示例类型选择：分类/回归/时序预测 */}
-          <Select value={compareDemoType} onValueChange={(value: TaskType) => setCompareDemoType(value)}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="示例类型" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="classification">分类</SelectItem>
-              <SelectItem value="regression">回归</SelectItem>
-              <SelectItem value="forecasting">时序预测</SelectItem>
-            </SelectContent>
-          </Select>
-
           <Button
             variant="outline"
             size="sm"
@@ -2271,7 +2288,7 @@ interface FormData {
               // 重置表单
               setFormData({
                 taskName: '',
-                taskType: 'forecasting',
+                taskType: TASK_TYPES.forecasting,
                 projectId: '',
                 datasetName: '',
                 datasetVersion: '',
@@ -2314,8 +2331,8 @@ interface FormData {
                       mae: true,
                       mape: true,
                       r2: true,
-                      relDeviationPercents: [10, 20],
-                      absDeviationValues: [10, 20],
+                      relDeviationPercents: [10],
+                      absDeviationValues: [10],
                       customMetrics: []
                     },
                     visualizations: {
@@ -2330,7 +2347,9 @@ interface FormData {
                       precision: { enabled: true, average: 'binary' },
                       recall: { enabled: true, average: 'binary' },
                       f1: { enabled: true, average: 'macro' },
-                      rocAuc: { enabled: true, average: 'macro' }
+                      accuracy: { enabled: true, average: 'acc' },
+                      rocAuc: { enabled: true, average: 'macro' },
+                      customMetricCode: ''
                     },
                     visualizations: {
                       rocCurve: true,
@@ -2345,8 +2364,8 @@ interface FormData {
                       mae: true,
                       mape: true,
                       r2: true,
-                      relDeviationPercents: [10, 20],
-                      absDeviationValues: [10, 20],
+                      relDeviationPercents: [10],
+                      absDeviationValues: [10],
                       customMetrics: []
                     },
                     visualizations: {
@@ -2358,7 +2377,7 @@ interface FormData {
                   }
                 },
                 manualConfig: '',
-                resourceType: 'auto',
+                resourceType: 'cpu',
                 resourceConfig: {
                   cores: 4,
                   memory: 8,
@@ -2460,9 +2479,9 @@ interface FormData {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="forecasting">时序预测</SelectItem>
-                            <SelectItem value="classification">分类</SelectItem>
-                            <SelectItem value="regression">回归</SelectItem>
+                            {Array.from(ALLOWED_TASK_TYPES).map((tt) => (
+                              <SelectItem key={tt} value={tt}>{getTaskTypeLabel(tt as TaskType)}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         {formErrors.taskType && (
@@ -2513,14 +2532,14 @@ interface FormData {
                             <span>资源类型</span>
                             <span className="text-red-500">*</span>
                           </Label>
-                          <Select value={formData.resourceType} onValueChange={(value: 'auto' | 'cpu' | 'gpu') => handleInputChange('resourceType', value)}>
+                          <Select value={formData.resourceType} onValueChange={(value: 'cpu' | 'gpu' | 'npu') => handleInputChange('resourceType', value)}>
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="auto">自动分配</SelectItem>
                               <SelectItem value="cpu">CPU</SelectItem>
                               <SelectItem value="gpu">GPU</SelectItem>
+                              <SelectItem value="npu">NPU</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -2552,18 +2571,12 @@ interface FormData {
                                   <span>高 - 插队执行</span>
                                 </div>
                               </SelectItem>
-                              <SelectItem value="urgent">
-                                <div className="flex items-center space-x-2">
-                                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                  <span>紧急 - 立即执行</span>
-                                </div>
-                              </SelectItem>
+
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
 
-                      {formData.resourceType !== 'auto' && (
                         <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
                           <h4 className="font-medium">资源配额设置</h4>
                           <div className="grid grid-cols-3 gap-4">
@@ -2611,7 +2624,6 @@ interface FormData {
                             </div>
                           </div>
                         </div>
-                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -3005,12 +3017,8 @@ interface FormData {
                       {/* 多选模式（默认） */}
                       <div className="space-y-2">
                         {availableModels
-                          // 创建任务步骤：隐藏 神经网络模型、随机森林、AutoGluon 相关选项
-                          .filter(model => 
-                            model.status === 'available' &&
-                            !['神经网络模型', '随机森林', 'AutoGluon-Tabular', 'AutoGluon'].includes(model.name)
-                          )
-                          .map(model => (
+                           .filter(model => model.status === 'available' && ALLOWED_MODELS.has(model.name))
+                           .map(model => (
                             <div 
                               key={model.id} 
                               className={`border rounded-lg p-3 cursor-pointer transition-colors ${
@@ -3123,10 +3131,10 @@ interface FormData {
                       <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
                         <div className="flex items-center space-x-2 text-blue-700">
                           <Settings className="h-4 w-4" />
-                          <span className="font-medium">页面配置</span>
+                          <span className="font-medium">输入配置</span>
                         </div>
 
-                        {formData.taskType === 'forecasting' && (
+                        {formData.taskType === TASK_TYPES.forecasting && (
                           <div className="space-y-4">
                             {/* 时间列：来源于第2步选择的数据集公共字段 */}
                             <div className="grid grid-cols-2 gap-4">
@@ -3358,7 +3366,7 @@ interface FormData {
                           </div>
                         )}
 
-                        {formData.taskType === 'classification' && (
+                        {formData.taskType === TASK_TYPES.classification && (
                           <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                               <div>
@@ -3417,7 +3425,7 @@ interface FormData {
                           </div>
                         )}
 
-                        {formData.taskType === 'regression' && (
+                        {formData.taskType === TASK_TYPES.regression && (
                           <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                               <div>
@@ -3484,7 +3492,7 @@ interface FormData {
                           </div>
 
                           {/* 时序预测输出配置 */}
-                          {formData.taskType === 'forecasting' && (
+                          {formData.taskType === TASK_TYPES.forecasting && (
                             <div className="space-y-3">
                               <div>
                                 <Label className="text-sm font-medium">评估指标</Label>
@@ -3560,14 +3568,18 @@ interface FormData {
                                     <Label htmlFor="fct-r2" className="text-sm">R²</Label>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                                   <div>
                                     <Label htmlFor="fct-rel-dev" className="text-sm">相对偏差阈值(±%)</Label>
                                     <Input
                                       id="fct-rel-dev"
-                                      value={formData.outputConfig.forecasting.metrics.relDeviationPercents.join(', ')}
+                                      type="number"
+                                      min={0}
+                                      step="0.1"
+                                      value={formData.outputConfig.forecasting.metrics.relDeviationPercents[0] ?? 10}
                                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        const val = parseFloat(e.target.value);
+                                        const nums = Number.isNaN(val) ? [] : [val];
                                         handleInputChange('outputConfig', {
                                           ...formData.outputConfig,
                                           forecasting: {
@@ -3576,16 +3588,19 @@ interface FormData {
                                           }
                                         });
                                       }}
-                                      placeholder="如: 10, 20"
+                                      placeholder="默认: 10"
                                     />
                                   </div>
                                   <div>
-                                    <Label htmlFor="fct-abs-dev" className="text-sm">绝对偏差阈值(±)</Label>
+                                    <Label htmlFor="fct-abs-dev" className="text-sm">绝对偏差阈值(±%)</Label>
                                     <Input
                                       id="fct-abs-dev"
-                                      value={formData.outputConfig.forecasting.metrics.absDeviationValues.join(', ')}
+                                      type="number"
+                                      step="0.1"
+                                      value={formData.outputConfig.forecasting.metrics.absDeviationValues[0] ?? 10}
                                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        const val = parseFloat(e.target.value);
+                                        const nums = Number.isNaN(val) ? [] : [val];
                                         handleInputChange('outputConfig', {
                                           ...formData.outputConfig,
                                           forecasting: {
@@ -3594,25 +3609,7 @@ interface FormData {
                                           }
                                         });
                                       }}
-                                      placeholder="如: 10, 20"
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label htmlFor="fct-custom-metrics" className="text-sm">自定义指标</Label>
-                                    <Input
-                                      id="fct-custom-metrics"
-                                      value={formData.outputConfig.forecasting.metrics.customMetrics.join(', ')}
-                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                        const items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                                        handleInputChange('outputConfig', {
-                                          ...formData.outputConfig,
-                                          forecasting: {
-                                            ...formData.outputConfig.forecasting,
-                                            metrics: { ...formData.outputConfig.forecasting.metrics, customMetrics: items }
-                                          }
-                                        });
-                                      }}
-                                      placeholder="如: smape, mase"
+                                      placeholder="默认: 10"
                                     />
                                   </div>
                                 </div>
@@ -3683,12 +3680,61 @@ interface FormData {
                           )}
 
                           {/* 分类输出配置 */}
-                          {formData.taskType === 'classification' && (
+                          {formData.taskType === TASK_TYPES.classification && (
                             <div className="space-y-3">
                               <div>
                                 <Label className="text-sm font-medium">评估指标与平均方式</Label>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
-                                  {/* Precision */}
+                                  {/* Accuracy（置顶，仅复选，无下拉）*/}
+                                  <div className="flex items-center gap-2 md:col-span-2">
+                                    <Checkbox
+                                      id="cls-accuracy"
+                                      checked={formData.outputConfig.classification.metrics.accuracy.enabled}
+                                      onCheckedChange={(checked: boolean) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            accuracy: { ...formData.outputConfig.classification.metrics.accuracy, enabled: Boolean(checked) }
+                                          }
+                                        }
+                                      })}
+                                    />
+                                    <Label htmlFor="cls-accuracy" className="text-sm w-20">Accuracy</Label>
+                                  </div>
+
+                                  {/* 共享平均方式（对 Precision / Recall / F1 / ROC-AUC 同时生效）*/}
+                                  <div className="flex items-center gap-2 md:col-span-2">
+                                    <Label htmlFor="cls-shared-average" className="text-sm w-48">平均方式（Precision/Recall/F1/ROC-AUC）</Label>
+                                    <Select
+                                      value={formData.outputConfig.classification.metrics.precision.average}
+                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
+                                        ...formData.outputConfig,
+                                        classification: {
+                                          ...formData.outputConfig.classification,
+                                          metrics: {
+                                            ...formData.outputConfig.classification.metrics,
+                                            precision: { ...formData.outputConfig.classification.metrics.precision, average: value },
+                                            recall: { ...formData.outputConfig.classification.metrics.recall, average: value },
+                                            f1: { ...formData.outputConfig.classification.metrics.f1, average: value },
+                                            rocAuc: { ...formData.outputConfig.classification.metrics.rocAuc, average: value }
+                                          }
+                                        }
+                                      })}
+                                    >
+                                      <SelectTrigger id="cls-shared-average" className="h-8 w-36"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="micro">micro</SelectItem>
+                                        <SelectItem value="macro">macro</SelectItem>
+                                        <SelectItem value="samples">samples</SelectItem>
+                                        <SelectItem value="weighted">weighted</SelectItem>
+                                        <SelectItem value="binary">binary</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  {/* Precision（仅复选）*/}
                                   <div className="flex items-center gap-2">
                                     <Checkbox
                                       id="cls-precision"
@@ -3705,31 +3751,9 @@ interface FormData {
                                       })}
                                     />
                                     <Label htmlFor="cls-precision" className="text-sm w-20">Precision</Label>
-                                    <Select
-                                      value={formData.outputConfig.classification.metrics.precision.average}
-                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
-                                        ...formData.outputConfig,
-                                        classification: {
-                                          ...formData.outputConfig.classification,
-                                          metrics: {
-                                            ...formData.outputConfig.classification.metrics,
-                                            precision: { ...formData.outputConfig.classification.metrics.precision, average: value }
-                                          }
-                                        }
-                                      })}
-                                    >
-                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="micro">micro</SelectItem>
-                                        <SelectItem value="macro">macro</SelectItem>
-                                        <SelectItem value="samples">samples</SelectItem>
-                                        <SelectItem value="weighted">weighted</SelectItem>
-                                        <SelectItem value="binary">binary</SelectItem>
-                                        <SelectItem value="none">none</SelectItem>
-                                      </SelectContent>
-                                    </Select>
                                   </div>
-                                  {/* Recall */}
+
+                                  {/* Recall（仅复选）*/}
                                   <div className="flex items-center gap-2">
                                     <Checkbox
                                       id="cls-recall"
@@ -3746,31 +3770,9 @@ interface FormData {
                                       })}
                                     />
                                     <Label htmlFor="cls-recall" className="text-sm w-20">Recall</Label>
-                                    <Select
-                                      value={formData.outputConfig.classification.metrics.recall.average}
-                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
-                                        ...formData.outputConfig,
-                                        classification: {
-                                          ...formData.outputConfig.classification,
-                                          metrics: {
-                                            ...formData.outputConfig.classification.metrics,
-                                            recall: { ...formData.outputConfig.classification.metrics.recall, average: value }
-                                          }
-                                        }
-                                      })}
-                                    >
-                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="micro">micro</SelectItem>
-                                        <SelectItem value="macro">macro</SelectItem>
-                                        <SelectItem value="samples">samples</SelectItem>
-                                        <SelectItem value="weighted">weighted</SelectItem>
-                                        <SelectItem value="binary">binary</SelectItem>
-                                        <SelectItem value="none">none</SelectItem>
-                                      </SelectContent>
-                                    </Select>
                                   </div>
-                                  {/* F1 */}
+
+                                  {/* F1（仅复选）*/}
                                   <div className="flex items-center gap-2">
                                     <Checkbox
                                       id="cls-f1"
@@ -3787,31 +3789,9 @@ interface FormData {
                                       })}
                                     />
                                     <Label htmlFor="cls-f1" className="text-sm w-20">F1</Label>
-                                    <Select
-                                      value={formData.outputConfig.classification.metrics.f1.average}
-                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
-                                        ...formData.outputConfig,
-                                        classification: {
-                                          ...formData.outputConfig.classification,
-                                          metrics: {
-                                            ...formData.outputConfig.classification.metrics,
-                                            f1: { ...formData.outputConfig.classification.metrics.f1, average: value }
-                                          }
-                                        }
-                                      })}
-                                    >
-                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="micro">micro</SelectItem>
-                                        <SelectItem value="macro">macro</SelectItem>
-                                        <SelectItem value="samples">samples</SelectItem>
-                                        <SelectItem value="weighted">weighted</SelectItem>
-                                        <SelectItem value="binary">binary</SelectItem>
-                                        <SelectItem value="none">none</SelectItem>
-                                      </SelectContent>
-                                    </Select>
                                   </div>
-                                  {/* ROC-AUC */}
+
+                                  {/* ROC-AUC（仅复选）*/}
                                   <div className="flex items-center gap-2">
                                     <Checkbox
                                       id="cls-rocauc"
@@ -3828,34 +3808,26 @@ interface FormData {
                                       })}
                                     />
                                     <Label htmlFor="cls-rocauc" className="text-sm w-20">ROC-AUC</Label>
-                                    <Select
-                                      value={formData.outputConfig.classification.metrics.rocAuc.average}
-                                      onValueChange={(value: AverageMethod) => handleInputChange('outputConfig', {
-                                        ...formData.outputConfig,
-                                        classification: {
-                                          ...formData.outputConfig.classification,
-                                          metrics: {
-                                            ...formData.outputConfig.classification.metrics,
-                                            rocAuc: { ...formData.outputConfig.classification.metrics.rocAuc, average: value }
-                                          }
-                                        }
-                                      })}
-                                    >
-                                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="micro">micro</SelectItem>
-                                        <SelectItem value="macro">macro</SelectItem>
-                                        <SelectItem value="samples">samples</SelectItem>
-                                        <SelectItem value="weighted">weighted</SelectItem>
-                                        <SelectItem value="binary">binary</SelectItem>
-                                        <SelectItem value="none">none</SelectItem>
-                                      </SelectContent>
-                                    </Select>
                                   </div>
                                 </div>
                               </div>
 
                               <div>
+                                <Label htmlFor="cls-custom-metric-code" className="text-sm font-medium">自定义指标</Label>
+                                <Textarea
+                                  id="cls-custom-metric-code"
+                                  placeholder="请输入有效的 Python 函数代码，用于自定义评估指标计算"
+                                  value={formData.outputConfig.classification.metrics.customMetricCode}
+                                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => handleInputChange('outputConfig', {
+                                    ...formData.outputConfig,
+                                    classification: {
+                                      ...formData.outputConfig.classification,
+                                      metrics: { ...formData.outputConfig.classification.metrics, customMetricCode: e.target.value }
+                                    }
+                                  })}
+                                  rows={6}
+                                  className="mt-2 w-full"
+                                />
                                 <Label className="text-sm font-medium">可视化</Label>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
                                   <div className="flex items-center gap-2">
@@ -3906,7 +3878,7 @@ interface FormData {
                           )}
 
                           {/* 回归输出配置 */}
-                          {formData.taskType === 'regression' && (
+                          {formData.taskType === TASK_TYPES.regression && (
                             <div className="space-y-3">
                               <div>
                                 <Label className="text-sm font-medium">评估指标</Label>
@@ -3982,14 +3954,18 @@ interface FormData {
                                     <Label htmlFor="reg-r2" className="text-sm">R²</Label>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                                   <div>
                                     <Label htmlFor="reg-rel-dev" className="text-sm">相对偏差阈值(±%)</Label>
                                     <Input
                                       id="reg-rel-dev"
-                                      value={formData.outputConfig.regression.metrics.relDeviationPercents.join(', ')}
+                                      type="number"
+                                      min={0}
+                                      step="0.1"
+                                      value={formData.outputConfig.regression.metrics.relDeviationPercents[0] ?? 10}
                                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        const val = parseFloat(e.target.value);
+                                        const nums = Number.isNaN(val) ? [] : [val];
                                         handleInputChange('outputConfig', {
                                           ...formData.outputConfig,
                                           regression: {
@@ -3998,16 +3974,19 @@ interface FormData {
                                           }
                                         });
                                       }}
-                                      placeholder="如: 10, 20"
+                                      placeholder="默认: 10"
                                     />
                                   </div>
                                   <div>
-                                    <Label htmlFor="reg-abs-dev" className="text-sm">绝对偏差阈值(±)</Label>
+                                    <Label htmlFor="reg-abs-dev" className="text-sm">绝对偏差阈值(±%)</Label>
                                     <Input
                                       id="reg-abs-dev"
-                                      value={formData.outputConfig.regression.metrics.absDeviationValues.join(', ')}
+                                      type="number"
+                                      step="0.1"
+                                      value={formData.outputConfig.regression.metrics.absDeviationValues[0] ?? 10}
                                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                        const nums = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !Number.isNaN(n));
+                                        const val = parseFloat(e.target.value);
+                                        const nums = Number.isNaN(val) ? [] : [val];
                                         handleInputChange('outputConfig', {
                                           ...formData.outputConfig,
                                           regression: {
@@ -4016,25 +3995,7 @@ interface FormData {
                                           }
                                         });
                                       }}
-                                      placeholder="如: 10, 20"
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label htmlFor="reg-custom-metrics" className="text-sm">自定义指标</Label>
-                                    <Input
-                                      id="reg-custom-metrics"
-                                      value={formData.outputConfig.regression.metrics.customMetrics.join(', ')}
-                                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                        const items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                                        handleInputChange('outputConfig', {
-                                          ...formData.outputConfig,
-                                          regression: {
-                                            ...formData.outputConfig.regression,
-                                            metrics: { ...formData.outputConfig.regression.metrics, customMetrics: items }
-                                          }
-                                        });
-                                      }}
-                                      placeholder="如: smape, mase"
+                                      placeholder="默认: 10"
                                     />
                                   </div>
                                 </div>
@@ -4107,7 +4068,7 @@ interface FormData {
 
                         <div className="bg-blue-100 p-3 rounded border border-blue-200">
                           <p className="text-sm text-blue-800">
-                            <strong>页面配置说明:</strong> 针对不同任务类型提供常用参数项。若需要更复杂的配置，请切换到 JSON 模式。
+                            <strong>输入配置说明:</strong> 针对不同任务类型提供常用参数项。若需要更复杂的配置，请切换到 JSON 模式。
                           </p>
                         </div>
                       </div>
@@ -4273,8 +4234,8 @@ interface FormData {
             </DialogTitle>
           </DialogHeader>
           <TaskCompare
-            task1={compareDemoType === 'classification' ? taskCompareDemoA : (compareDemoType === 'regression' ? taskCompareRegA : taskCompareFctA)}
-            task2={compareDemoType === 'classification' ? taskCompareDemoB : (compareDemoType === 'regression' ? taskCompareRegB : taskCompareFctB)}
+            task1={compareDemoType === TASK_TYPES.classification ? taskCompareDemoA : (compareDemoType === TASK_TYPES.regression ? taskCompareRegA : taskCompareFctA)}
+            task2={compareDemoType === TASK_TYPES.classification ? taskCompareDemoB : (compareDemoType === TASK_TYPES.regression ? taskCompareRegB : taskCompareFctB)}
             onBack={() => setIsCompareDemoOpen(false)}
           />
         </DialogContent>
@@ -4305,9 +4266,9 @@ interface FormData {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">全部类型</SelectItem>
-                    <SelectItem value="forecasting">时序预测</SelectItem>
-                    <SelectItem value="classification">分类</SelectItem>
-                    <SelectItem value="regression">回归</SelectItem>
+                    {Array.from(ALLOWED_TASK_TYPES).map((tt) => (
+                      <SelectItem key={tt} value={tt}>{getTaskTypeLabel(tt as TaskType)}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -4356,45 +4317,170 @@ interface FormData {
                     <SelectItem value="low">低</SelectItem>
                     <SelectItem value="medium">中</SelectItem>
                     <SelectItem value="high">高</SelectItem>
-                    <SelectItem value="urgent">紧急</SelectItem>
+                    {/* 按需求移除“紧急”选项 */}
                   </SelectContent>
                 </Select>
               </div>
 
               <div>
                 <Label>数据集名称</Label>
-                <Input
-                  placeholder="筛选数据集"
-                  value={filters.datasetName}
-                  onChange={(e) => handleFilterChange('datasetName', e.target.value)}
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-[260px] justify-start">
+                      {filters.datasetNames.length === 0
+                        ? '筛选数据集'
+                        : `${filters.datasetNames.slice(0, 2).join(', ')}${filters.datasetNames.length > 2 ? ` +${filters.datasetNames.length - 2}` : ''}`}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[300px] p-0">
+                    <Command>
+                      <CommandInput
+                        placeholder="搜索数据集..."
+                        value={datasetFilterQuery}
+                        onValueChange={setDatasetFilterQuery}
+                      />
+                      <CommandList>
+                        <CommandEmpty>未找到数据集</CommandEmpty>
+                        <CommandGroup>
+                          {datasetOptions
+                            .filter((name) => !datasetFilterQuery || name.toLowerCase().includes(datasetFilterQuery.toLowerCase()))
+                            .map((name) => (
+                              <CommandItem
+                                key={name}
+                                onSelect={() => {
+                                  const cur = filters.datasetNames || [];
+                                  const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
+                                  handleFilterChange('datasetNames', next);
+                                }}
+                              >
+                                <Checkbox
+                                  checked={filters.datasetNames.includes(name)}
+                                  onCheckedChange={() => {
+                                    const cur = filters.datasetNames || [];
+                                    const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
+                                    handleFilterChange('datasetNames', next);
+                                  }}
+                                  className="mr-2"
+                                />
+                                <span>{name}</span>
+                              </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div>
                 <Label>模型名称</Label>
-                <Input
-                  placeholder="筛选模型"
-                  value={filters.modelName}
-                  onChange={(e) => handleFilterChange('modelName', e.target.value)}
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-[260px] justify-start">
+                      {filters.modelNames.length === 0
+                        ? '筛选模型'
+                        : `${filters.modelNames.slice(0, 2).join(', ')}${filters.modelNames.length > 2 ? ` +${filters.modelNames.length - 2}` : ''}`}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[300px] p-0">
+                    <Command>
+                      <CommandInput
+                        placeholder="搜索模型..."
+                        value={modelFilterQuery}
+                        onValueChange={setModelFilterQuery}
+                      />
+                      <CommandList>
+                        <CommandEmpty>未找到模型</CommandEmpty>
+                        <CommandGroup>
+                          {modelOptions
+                            .filter((name) => !modelFilterQuery || name.toLowerCase().includes(modelFilterQuery.toLowerCase()))
+                            .map((name) => (
+                              <CommandItem
+                                key={name}
+                                onSelect={() => {
+                                  const cur = filters.modelNames || [];
+                                  const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
+                                  handleFilterChange('modelNames', next);
+                                }}
+                              >
+                                <Checkbox
+                                  checked={filters.modelNames.includes(name)}
+                                  onCheckedChange={() => {
+                                    const cur = filters.modelNames || [];
+                                    const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name];
+                                    handleFilterChange('modelNames', next);
+                                  }}
+                                  className="mr-2"
+                                />
+                                <span>{name}</span>
+                              </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div>
-                <Label>开始日期</Label>
-                <Input
-                  type="date"
-                  value={filters.dateRange.start}
-                  onChange={(e) => handleFilterChange('dateRange', { ...filters.dateRange, start: e.target.value })}
-                />
-              </div>
+                <Label>日期范围</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-[320px] justify-between">
+                      <span className="truncate text-left">
+                        {filters.dateRange.start && filters.dateRange.end
+                          ? `${filters.dateRange.start} - ${filters.dateRange.end}`
+                          : '开始日期 - 结束日期'}
+                      </span>
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[640px] p-4">
+                    <div className="space-y-3">
+                      {/* 顶部输入回显区域 */}
+                      <div className="flex items-center gap-2">
+                        <Input
+                          readOnly
+                          placeholder="开始日期"
+                          value={filters.dateRange.start || ''}
+                          className="w-48"
+                        />
+                        <span className="text-gray-500">-</span>
+                        <Input
+                          readOnly
+                          placeholder="结束日期"
+                          value={filters.dateRange.end || ''}
+                          className="w-48"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleFilterChange('dateRange', { start: '', end: '' })}
+                        >
+                          清除
+                        </Button>
+                      </div>
 
-              <div>
-                <Label>结束日期</Label>
-                <Input
-                  type="date"
-                  value={filters.dateRange.end}
-                  onChange={(e) => handleFilterChange('dateRange', { ...filters.dateRange, end: e.target.value })}
-                />
+                      {/* 双月日历选择 */}
+                      <DateRangeCalendar
+                        mode="range"
+                        numberOfMonths={2}
+                        initialFocus
+                        defaultMonth={filters.dateRange.start ? new Date(filters.dateRange.start) : new Date()}
+                        selected={{
+                          from: filters.dateRange.start ? new Date(filters.dateRange.start) : undefined,
+                          to: filters.dateRange.end ? new Date(filters.dateRange.end) : undefined,
+                        }}
+                        onSelect={(range: any) => {
+                          const start = range?.from ? new Date(range.from) : undefined;
+                          const end = range?.to ? new Date(range.to) : undefined;
+                          const fmt = (d: Date | undefined) => (d ? d.toISOString().slice(0, 10) : '');
+                          handleFilterChange('dateRange', { start: fmt(start), end: fmt(end) });
+                        }}
+                      />
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
             
@@ -4419,6 +4505,17 @@ interface FormData {
                 已选择 {selectedTaskIds.length} 个任务
               </span>
               <div className="flex items-center space-x-2">
+                {selectedTaskIds.length >= 2 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsCompareDemoOpen(true)}
+                    className="flex items-center space-x-1"
+                  >
+                    <GitCompare className="h-4 w-4" />
+                    <span>任务对比预览</span>
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -4617,12 +4714,13 @@ interface FormData {
                     const priorityConfig = getPriorityConfig(task.priority);
                     const StatusIcon = statusConfig.icon;
                     const isHighlighted = task.id === highlightTaskId;
+                    const isStatusAnim = task.id === statusAnimTaskId;
                     
                     return (
                       <TableRow
                         key={task.id}
                         id={`task-row-${task.id}`}
-                        className={`hover:bg-gray-50 ${isHighlighted ? 'bg-amber-50 ring-2 ring-amber-200' : ''}`}
+                        className={`hover:bg-gray-50 ${isHighlighted ? 'bg-amber-50 ring-2 ring-amber-200' : ''} ${isStatusAnim ? 'ring-2 ring-lime-300 bg-lime-50 animate-pulse' : ''}`}
                       >
                         <TableCell>
                           <Checkbox
@@ -4704,10 +4802,12 @@ interface FormData {
                               <StatusIcon className="h-3 w-3 mr-1" />
                               {statusConfig.label}
                             </Badge>
-                            {task.status === 'running' && task.progress !== undefined && (
+                            {(['running','pending','completed'].includes(task.status)) && (
                               <div className="w-20">
-                                <Progress value={task.progress} className="h-2" />
-                                <div className="text-xs text-gray-500 mt-1">{task.progress}%</div>
+                                <Progress value={task.status === 'completed' ? 100 : task.status === 'pending' ? 0 : (task.progress ?? 0)} className="h-2" />
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {task.status === 'completed' ? '100%' : `${task.status === 'pending' ? 0 : (task.progress ?? 0)}%`}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -4735,34 +4835,29 @@ interface FormData {
                           {/* 常用操作直接展示 */}
                           {(() => {
                             const actions = getAvailableActions(task);
-                            const commonKeys = ['view', 'edit', 'start', 'pause'];
+                            const commonKeys = getCommonActionKeys(task);
                             const commonActions = actions.filter(a => commonKeys.includes(a.key));
                             const moreActions = actions.filter(a => !commonKeys.includes(a.key));
-                            const hasStart = commonActions.some(a => a.key === 'start');
-                            const hasPause = commonActions.some(a => a.key === 'pause');
                             return (
                               <div className="flex items-center gap-2 justify-end w-[220px]">
-                                {/* 详情 */}
-                                <Button variant="outline" size="sm" onClick={() => handleTaskAction('view', task.id)} className="px-2">
-                                  <Eye className="h-4 w-4 mr-1" /> 详情
-                                </Button>
-                                {/* 编辑（仅当可用） */}
-                                {commonActions.some(a => a.key === 'edit') && (
-                                  <Button variant="outline" size="sm" onClick={() => handleTaskAction('edit', task.id)} className="px-2">
-                                    <Pencil className="h-4 w-4 mr-1" /> 编辑
-                                  </Button>
-                                )}
-                                {/* 开始/暂停 */}
-                                {hasStart && (
-                                  <Button variant="default" size="sm" onClick={() => handleTaskAction('start', task.id)} className="px-2">
-                                    <Play className="h-4 w-4 mr-1" /> 开始
-                                  </Button>
-                                )}
-                                {hasPause && (
-                                  <Button variant="secondary" size="sm" onClick={() => handleTaskAction('pause', task.id)} className="px-2">
-                                    <Pause className="h-4 w-4 mr-1" /> 暂停
-                                  </Button>
-                                )}
+                                {commonActions.map((a) => {
+                                  const ActionIcon = a.icon;
+                                  const key = `${task.id}:${a.key}`;
+                                  const isLoading = loadingAction === key;
+                                  const variant = (a.key === 'stop' || a.key === 'delete') ? 'destructive' : (a.key === 'start' || a.key === 'retry') ? 'default' : 'outline';
+                                  return (
+                                    <Button
+                                      key={a.key}
+                                      variant={variant as any}
+                                      size="sm"
+                                      disabled={isLoading}
+                                      onClick={() => handleTaskAction(a.key, task.id)}
+                                      className={`px-2 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                      <ActionIcon className="h-4 w-4 mr-1" /> {a.label}
+                                    </Button>
+                                  );
+                                })}
                                 {/* 更多 */}
                                 {moreActions.length > 0 && (
                                   <DropdownMenu>
@@ -4774,10 +4869,14 @@ interface FormData {
                                     <DropdownMenuContent align="end">
                                       {moreActions.map((action) => {
                                         const ActionIcon = action.icon;
+                                        const key = `${task.id}:${action.key}`;
+                                        const isLoading = loadingAction === key;
                                         return (
                                           <DropdownMenuItem
                                             key={action.key}
+                                            disabled={isLoading}
                                             onClick={() => handleTaskAction(action.key, task.id)}
+                                            className={isLoading ? 'opacity-50 pointer-events-none' : ''}
                                           >
                                             <ActionIcon className="h-4 w-4 mr-2" />
                                             {action.label}
@@ -4805,12 +4904,13 @@ interface FormData {
                 const priorityConfig = getPriorityConfig(task.priority);
                 const StatusIcon = statusConfig.icon;
                 const isHighlighted = task.id === highlightTaskId;
+                const isStatusAnim = task.id === statusAnimTaskId;
                 
                 return (
                   <Card
                     key={task.id}
                     id={`task-grid-${task.id}`}
-                    className={`hover:shadow-md transition-shadow ${isHighlighted ? 'ring-2 ring-amber-200 bg-amber-50' : ''}`}
+                    className={`hover:shadow-md transition-shadow ${isHighlighted ? 'ring-2 ring-amber-200 bg-amber-50' : ''} ${isStatusAnim ? 'ring-2 ring-lime-300 bg-lime-50 animate-pulse' : ''}`}
                   >
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
@@ -4905,10 +5005,10 @@ interface FormData {
                           <StatusIcon className="h-3 w-3 mr-1" />
                           {statusConfig.label}
                         </Badge>
-                        {task.status === 'running' && task.progress !== undefined && (
+                        {(['running','pending','completed'].includes(task.status)) && (
                           <div className="flex items-center space-x-2">
-                            <Progress value={task.progress} className="w-16 h-2" />
-                            <span className="text-xs text-gray-500">{task.progress}%</span>
+                            <Progress value={task.status === 'completed' ? 100 : task.status === 'pending' ? 0 : (task.progress ?? 0)} className="w-16 h-2" />
+                            <span className="text-xs text-gray-500">{task.status === 'completed' ? '100%' : `${task.status === 'pending' ? 0 : (task.progress ?? 0)}%`}</span>
                           </div>
                         )}
                       </div>
@@ -4994,12 +5094,14 @@ interface FormData {
                 </div>
               )}
 
-              {selectedTaskForDetails.status === 'running' && selectedTaskForDetails.progress !== undefined && (
+              {(['running','pending','completed'].includes(selectedTaskForDetails.status)) && (
                 <div>
                   <Label className="text-sm font-medium text-gray-500">执行进度</Label>
                   <div className="mt-2">
-                    <Progress value={selectedTaskForDetails.progress} className="h-3" />
-                    <p className="text-sm text-gray-600 mt-1">{selectedTaskForDetails.progress}% 完成</p>
+                    <Progress value={selectedTaskForDetails.status === 'completed' ? 100 : selectedTaskForDetails.status === 'pending' ? 0 : (selectedTaskForDetails.progress ?? 0)} className="h-3" />
+                    <p className="text-sm text-gray-600 mt-1">
+                      {selectedTaskForDetails.status === 'completed' ? '100% 完成' : `${selectedTaskForDetails.status === 'pending' ? 0 : (selectedTaskForDetails.progress ?? 0)}% 完成`}
+                    </p>
                   </div>
                 </div>
               )}
@@ -5019,10 +5121,10 @@ interface FormData {
                   确认开始任务
                 </>
               )}
-              {confirmDialog.action === 'cancel' && (
+              {confirmDialog.action === 'stop' && (
                 <>
-                  <XCircle className="h-5 w-5 text-red-600" />
-                  确认取消任务
+                  <Square className="h-5 w-5 text-red-600" />
+                  确认停止任务
                 </>
               )}
               {confirmDialog.action === 'retry' && (
@@ -5035,6 +5137,12 @@ interface FormData {
                 <>
                   <Archive className="h-5 w-5 text-gray-600" />
                   确认归档任务
+                </>
+              )}
+              {confirmDialog.action === 'delete' && (
+                <>
+                  <Trash2 className="h-5 w-5 text-red-600" />
+                  确认删除任务
                 </>
               )}
             </DialogTitle>
@@ -5050,14 +5158,17 @@ interface FormData {
               {confirmDialog.action === 'start' && (
                 <p>确认要开始执行此任务吗？任务开始后将消耗计算资源，请确保配置正确。</p>
               )}
-              {confirmDialog.action === 'cancel' && (
-                <p>确认要取消此任务吗？取消后任务将停止执行，已完成的部分将被保留。</p>
+              {confirmDialog.action === 'stop' && (
+                <p>确认要停止正在执行的任务吗？停止后任务将立即中断，已完成的部分会被保留。</p>
               )}
               {confirmDialog.action === 'retry' && (
                 <p>确认要重试此任务吗？重试将按当前配置重新执行失败或已取消的任务。</p>
               )}
               {confirmDialog.action === 'archive' && (
                 <p>确认要归档此任务吗？归档后任务将移至历史记录，不会影响任务结果。</p>
+              )}
+              {confirmDialog.action === 'delete' && (
+                <p>确认要删除此任务吗？此操作不可撤销，任务将从列表中移除。</p>
               )}
             </div>
           </div>
@@ -5076,17 +5187,18 @@ interface FormData {
               className={
                 confirmDialog.action === 'start' 
                   ? '!bg-green-600 hover:!bg-green-700 !text-white' 
-                : confirmDialog.action === 'cancel'
+                : confirmDialog.action === 'stop' || confirmDialog.action === 'delete'
                   ? '!bg-red-600 hover:!bg-red-700 !text-white'
                 : confirmDialog.action === 'retry'
                   ? '!bg-blue-600 hover:!bg-blue-700 !text-white'
-                  : '!bg-gray-700 hover:!bg-gray-800 !text-white'
+                : '!bg-gray-700 hover:!bg-gray-800 !text-white'
               }
             >
               {confirmDialog.action === 'start' ? '开始任务' : 
-               confirmDialog.action === 'cancel' ? '取消任务' : 
+               confirmDialog.action === 'stop' ? '停止任务' : 
                confirmDialog.action === 'retry' ? '重试任务' : 
-               confirmDialog.action === 'archive' ? '归档任务' : '确认'}
+               confirmDialog.action === 'archive' ? '归档任务' : 
+               confirmDialog.action === 'delete' ? '删除任务' : '确认'}
             </Button>
           </div>
         </DialogContent>

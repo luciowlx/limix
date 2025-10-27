@@ -5,7 +5,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { Progress } from "./ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -53,7 +52,7 @@ interface FormData {
   name: string;
   description: string;
   projectId: string; // 所属项目（必填）
-  permission: 'private' | 'team' | 'public';
+  permission: 'team' | 'public';
   mode: 'traditional' | 'auto';
   tags: Array<{ name: string; color: string }>;
 }
@@ -65,7 +64,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     name: '',
     description: '',
     projectId: '',
-    permission: 'private',
+    permission: 'team',
     mode: 'traditional',
     tags: []
   });
@@ -104,7 +103,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
       name: '',
       description: '',
       projectId: '',
-      permission: 'private',
+      permission: 'team',
       mode: 'traditional',
       tags: []
     });
@@ -365,7 +364,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
   // 开始上传
   const handleStartUpload = useCallback(async () => {
     if (!formData.name.trim()) {
-      toast.error('请输入数据源名称');
+      toast.error('请输入数据集名称');
       return;
     }
 
@@ -605,10 +604,10 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
           {/* 基本信息表单 */}
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="name">数据源名称 *</Label>
+              <Label htmlFor="name">数据集名称 *</Label>
               <Input
                 id="name"
-                placeholder="请输入数据源名称"
+                placeholder="请输入数据集名称"
                 value={formData.name}
                 onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
               />
@@ -633,15 +632,14 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
               <Label htmlFor="permission">权限设置</Label>
               <Select
                 value={formData.permission}
-                onValueChange={(value: 'private' | 'team' | 'public') => 
+                onValueChange={(value: 'team' | 'public') => 
                   setFormData(prev => ({ ...prev, permission: value }))
-              }
-              >
+                }
+                >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="private">私有</SelectItem>
                   <SelectItem value="team">团队</SelectItem>
                   <SelectItem value="public">公开</SelectItem>
                 </SelectContent>
@@ -672,7 +670,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
             <Label htmlFor="description">描述</Label>
             <Textarea
               id="description"
-              placeholder="请输入数据源的详细描述，包括数据内容、用途等信息"
+              placeholder="请输入数据集的详细描述，包括数据内容、用途等信息"
               value={formData.description}
               onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
               rows={3}
@@ -729,25 +727,6 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>清洗方式</Label>
-            <RadioGroup
-              value={formData.mode}
-              onValueChange={(value: 'traditional' | 'auto') => 
-                setFormData(prev => ({ ...prev, mode: value }))
-              }
-              className="flex space-x-6"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="traditional" id="traditional" />
-                <Label htmlFor="traditional">手动清洗（规则配置）</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="auto" id="auto" />
-                <Label htmlFor="auto">自动清洗</Label>
-              </div>
-            </RadioGroup>
-          </div>
 
           {/* 自动模式：原型图示例 + 语音指令输入模块 */}
           {formData.mode === 'auto' && (

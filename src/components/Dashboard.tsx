@@ -165,7 +165,7 @@ export function Dashboard({
         { label: "总项目", value: 25 },
         { label: "进行中", value: 12 },
         { label: "已完成", value: 10 },
-        { label: "暂停中", value: 3 },
+        { label: "已延期", value: 3 },
       ],
       footer: { label: "项目健康度", value: "85%", delta: "+5%" },
       icon: Layers,
@@ -187,7 +187,7 @@ export function Dashboard({
       title: "任务统计",
       items: [
         { label: "总任务", value: 234 },
-        { label: "在跑中", value: 18 },
+        { label: "运行中", value: 18 },
         { label: "已完成", value: 15 },
         { label: "失败", value: 5 },
       ],
@@ -259,10 +259,7 @@ export function Dashboard({
                       </div>
                     ))}
                   </div>
-                  <div className="mt-3 text-xs text-gray-600 flex items-center justify-between">
-                    <span>{card.footer.label}</span>
-                    <span className="font-medium">{card.footer.value}</span>
-                  </div>
+                  {/* 底部指标已移除：项目健康度、数据质量分、近7天完成率、近30天表现 */}
                 </div>
               );
             })}

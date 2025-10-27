@@ -2807,6 +2807,10 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                         <SelectItem value="mean">均值填充</SelectItem>
                                         <SelectItem value="median">中位数填充</SelectItem>
                                         <SelectItem value="mode">众数填充</SelectItem>
+                                        {/* 新增缺失值填充方法 */}
+                                        <SelectItem value="linear">线性插值</SelectItem>
+                                        <SelectItem value="ffill">向前填充</SelectItem>
+                                        <SelectItem value="bfill">向后填充</SelectItem>
                                         <SelectItem value="custom">自定义值填充</SelectItem>
                                         <SelectItem value="limix">LimiX模型填充</SelectItem>
                                       </SelectContent>
