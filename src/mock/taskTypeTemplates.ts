@@ -29,7 +29,8 @@ export const taskTypeTemplates: TaskTypeTemplate[] = [
       ],
       parameters: [
         { name: "context_length", label: "上下文长度", type: "number", required: true, default: 30 },
-        { name: "forecast_start_time", label: "预测开始时间", type: "datetime", required: true },
+        // 改为非必填，类型改为文本
+        { name: "forecast_start_time", label: "预测开始时间", type: "text", required: false },
         { name: "primary_dataset", label: "主变量文件", type: "enum", optionsSource: "datasets", required: true }
       ]
     },

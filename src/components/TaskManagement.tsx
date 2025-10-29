@@ -1251,9 +1251,8 @@ interface FormData {
         if (!fc || fc.stepLength < 1 || fc.stepLength > 10000) {
           errors.forecastingStepLength = '步长应在1-10000之间';
         }
-        if (!fc || !String(fc.startTime || '').trim()) {
-          errors.forecastingStartTime = '请选择预测开始时间';
-        }
+        // 预测开始时间改为非必填：如果为空不报错
+        // 若后续需要格式校验，可在此判断非空后再校验格式
       } else if (formData.taskType === TASK_TYPES.classification) {
         const cc = formData.classificationConfig;
         if (!cc) {
@@ -3235,20 +3234,19 @@ interface FormData {
                               <div>
                                 <Label htmlFor="startTime" className="flex items-center space-x-1">
                                   <span>预测开始时间</span>
-                                  <span className="text-red-500">*</span>
+                                  {/* 改为非必填，去掉红色星号 */}
                                 </Label>
                                 <Input
                                   id="startTime"
-                                  type="datetime-local"
+                                  type="text"
+                                  placeholder="可选，示例：2025-10-29 08:00 或留空"
                                   value={formData.forecastingConfig.startTime}
                                   onChange={(e) => handleInputChange('forecastingConfig', {
                                     ...formData.forecastingConfig,
                                     startTime: e.target.value
                                   })}
                                 />
-                                {formErrors.forecastingStartTime && (
-                                  <p className="text-xs text-red-500 mt-1">{formErrors.forecastingStartTime}</p>
-                                )}
+                                {/* 非必填，不再显示必填错误 */}
                               </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
