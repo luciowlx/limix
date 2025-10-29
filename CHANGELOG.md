@@ -32,6 +32,12 @@
     - src/components/TaskDetailFullPage.tsx
   - 验证：运行 `npm run dev`，在 http://localhost:3002// 进入某个“时序预测”任务详情页，确认表格列名来自 unionFields（或权重补齐）且分页器可交互。
 
+- [Fix/TaskDetail] 修复“任务详情打开报错（2 条日志）”：原因是在组件渲染顺序中对未初始化变量进行访问（Temporal Dead Zone）。
+  - 措施：将 testFeatureFieldNames、forecastingTestSetRows 与分页相关逻辑移动到 aggregatedStats 定义之后，且确保依赖的 featureWeights 已初始化；避免在依赖尚未初始化时参与 Hook 的依赖计算。
+  - 涉及文件：
+    - src/components/TaskDetailFullPage.tsx（调整 Hook 顺序，消除 ReferenceError）
+  - 验证：保存后 Vite 热更新；重新打开“任务详情（时序预测）”，不再出现初始化顺序报错。
+
 ### 2025-10-29
 - [Fix/UI] 输出配置：将“绝对偏差阈值(±%)”的标签文案去掉最后的百分号，改为“绝对偏差阈值(±)”。不影响输入值与保存逻辑。
   - 涉及文件：

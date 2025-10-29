@@ -472,61 +472,7 @@ output:
     return arr;
   }, [forecastSeries, forecastingParams]);
 
-  // 测试集真实字段名（最多取5列）：优先使用聚合到的 unionFields，若不足则使用特征权重的字段名补齐
-  const testFeatureFieldNames = React.useMemo(() => {
-    const uf = (aggregatedStats?.unionFields || []).filter((f) => !/^(?:id|time|date|timestamp)$/i.test(f));
-    const base = uf.slice(0, 5);
-    if (base.length >= 5) return base;
-    const fallback = featureWeights.map((fw) => fw.feature);
-    const merged = Array.from(new Set([...base, ...fallback])).slice(0, 5);
-    return merged;
-  }, [aggregatedStats, featureWeights]);
-
-  // 预测结果表：构造测试集数据（使用真实字段名）与预测结果最后一列
-  const forecastingTestSetRows = React.useMemo(() => {
-    return forecastSeries.map((p, idx) => {
-      // 基于实际值构造示意的特征数值（字段名替换为真实字段名）
-      const syntheticVals = [
-        p.actual * (1 + (Math.random() - 0.5) * 0.02),
-        p.actual * 0.8 + Math.sin(idx / 8) * 2 + (Math.random() - 0.5) * 1.5,
-        p.actual * 1.2 + Math.cos(idx / 6) * 1.5 + (Math.random() - 0.5) * 1.5,
-        p.actual + (Math.random() - 0.5) * 3,
-        p.actual * 0.9 + (Math.random() - 0.5) * 2.5,
-      ];
-      const featureObj: Record<string, number> = {};
-      testFeatureFieldNames.forEach((name, i) => {
-        featureObj[name] = Number((syntheticVals[i % syntheticVals.length]).toFixed(2));
-      });
-      return { time: p.time, actual: p.actual, predicted: p.predicted, ...featureObj } as Record<string, any>;
-    });
-  }, [forecastSeries, testFeatureFieldNames]);
-
-  // 预测结果表分页：默认每页10行
-  const [resultPage, setResultPage] = useState<number>(1);
-  const pageSize = 10;
-  const totalRows = forecastingTestSetRows.length;
-  const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
-  useEffect(() => {
-    // 数据变化时重置到首页
-    setResultPage(1);
-  }, [totalRows]);
-  const startIndex = (resultPage - 1) * pageSize;
-  const currentRows = forecastingTestSetRows.slice(startIndex, startIndex + pageSize);
-  const pageNumbers: Array<number | 'ellipsis'> = React.useMemo(() => {
-    const arr: Array<number | 'ellipsis'> = [];
-    if (pageCount <= 7) {
-      for (let i = 1; i <= pageCount; i++) arr.push(i);
-      return arr;
-    }
-    arr.push(1, 2);
-    if (resultPage > 4) arr.push('ellipsis');
-    const start = Math.max(3, resultPage - 1);
-    const end = Math.min(pageCount - 2, resultPage + 1);
-    for (let i = start; i <= end; i++) arr.push(i);
-    if (resultPage < pageCount - 3) arr.push('ellipsis');
-    arr.push(pageCount - 1, pageCount);
-    return arr;
-  }, [pageCount, resultPage]);
+  
 
   // 偏差统计（正负相对/绝对偏差）
   const deviationStats = React.useMemo(() => {
@@ -758,6 +704,62 @@ output:
       statsList,
     };
   }, [task.datasets]);
+
+  // 测试集真实字段名（最多取5列）：优先使用聚合到的 unionFields，若不足则使用特征权重的字段名补齐
+  const testFeatureFieldNames = React.useMemo(() => {
+    const uf = (aggregatedStats?.unionFields || []).filter((f) => !/^(?:id|time|date|timestamp)$/i.test(f));
+    const base = uf.slice(0, 5);
+    if (base.length >= 5) return base;
+    const fallback = featureWeights.map((fw) => fw.feature);
+    const merged = Array.from(new Set([...base, ...fallback])).slice(0, 5);
+    return merged;
+  }, [aggregatedStats, featureWeights]);
+
+  // 预测结果表：构造测试集数据（使用真实字段名）与预测结果最后一列
+  const forecastingTestSetRows = React.useMemo(() => {
+    return forecastSeries.map((p, idx) => {
+      // 基于实际值构造示意的特征数值（字段名替换为真实字段名）
+      const syntheticVals = [
+        p.actual * (1 + (Math.random() - 0.5) * 0.02),
+        p.actual * 0.8 + Math.sin(idx / 8) * 2 + (Math.random() - 0.5) * 1.5,
+        p.actual * 1.2 + Math.cos(idx / 6) * 1.5 + (Math.random() - 0.5) * 1.5,
+        p.actual + (Math.random() - 0.5) * 3,
+        p.actual * 0.9 + (Math.random() - 0.5) * 2.5,
+      ];
+      const featureObj: Record<string, number> = {};
+      testFeatureFieldNames.forEach((name, i) => {
+        featureObj[name] = Number((syntheticVals[i % syntheticVals.length]).toFixed(2));
+      });
+      return { time: p.time, actual: p.actual, predicted: p.predicted, ...featureObj } as Record<string, any>;
+    });
+  }, [forecastSeries, testFeatureFieldNames]);
+
+  // 预测结果表分页：默认每页10行
+  const [resultPage, setResultPage] = useState<number>(1);
+  const pageSize = 10;
+  const totalRows = forecastingTestSetRows.length;
+  const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+  useEffect(() => {
+    // 数据变化时重置到首页
+    setResultPage(1);
+  }, [totalRows]);
+  const startIndex = (resultPage - 1) * pageSize;
+  const currentRows = forecastingTestSetRows.slice(startIndex, startIndex + pageSize);
+  const pageNumbers: Array<number | 'ellipsis'> = React.useMemo(() => {
+    const arr: Array<number | 'ellipsis'> = [];
+    if (pageCount <= 7) {
+      for (let i = 1; i <= pageCount; i++) arr.push(i);
+      return arr;
+    }
+    arr.push(1, 2);
+    if (resultPage > 4) arr.push('ellipsis');
+    const start = Math.max(3, resultPage - 1);
+    const end = Math.min(pageCount - 2, resultPage + 1);
+    for (let i = start; i <= end; i++) arr.push(i);
+    if (resultPage < pageCount - 3) arr.push('ellipsis');
+    arr.push(pageCount - 1, pageCount);
+    return arr;
+  }, [pageCount, resultPage]);
 
   // 多数据集：不同数据集的示例预览数据与字段元信息（模拟）
   const mockDatasetSamples: Record<string, Array<Record<string, any>>> = {
