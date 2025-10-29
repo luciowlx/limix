@@ -28,6 +28,12 @@
     - src/components/TaskManagement.tsx（forecasting/regression 两处标签）
   - 验证：运行 `npm run dev`，在 http://localhost:3000/ 进入“任务管理 -> 创建新任务 -> 输出配置”；查看“绝对偏差阈值”标签，已显示为“(±)”且不再包含“%”。
 
+- [Feat/TaskDetail/UI] 在任务详情（时序预测）页面的“任务指标”和“指标趋势”之间新增“预测结果表”，展示测试集数据列与最后一列预测结果。
+  - 说明：表格展示最近 40 条记录，列包含“时间/真实值/E1/E2/E3/E4/E5/预测结果”；测试集列为示意数据，后续可替换为后端真实特征。
+  - 涉及文件：
+    - src/components/TaskDetailFullPage.tsx（新增 forecastingTestSetRows 数据构造；插入 Table 卡片）
+  - 验证：运行 `npm run dev` 并打开 http://localhost:3000/（如端口占用则自动切换到 3001）；进入任务详情的时序预测页，确认在“任务指标”后的红框区域显示“预测结果表”，最后一列为预测结果。
+
 ### 2025-10-29
 - [Feat/Tasks/UI] 参数配置：将“预测开始时间”改为非必填，并把输入控件从日期/时间选择改为文本框；占位提示“可选，示例：2025-10-29 08:00 或留空”。
   - 涉及文件：

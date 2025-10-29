@@ -471,6 +471,19 @@ output:
     return arr;
   }, [forecastSeries, forecastingParams]);
 
+  // 预测结果表：构造测试集数据（示意）与预测结果最后一列
+  const forecastingTestSetRows = React.useMemo(() => {
+    return forecastSeries.map((p, idx) => {
+      // 构造若干示意特征列（与实际值相关并加入轻微噪声）
+      const E1 = Number((p.actual * (1 + (Math.random() - 0.5) * 0.02)).toFixed(2));
+      const E2 = Number((p.actual * 0.8 + Math.sin(idx / 8) * 2 + (Math.random() - 0.5) * 1.5).toFixed(2));
+      const E3 = Number((p.actual * 1.2 + Math.cos(idx / 6) * 1.5 + (Math.random() - 0.5) * 1.5).toFixed(2));
+      const E4 = Number((p.actual + (Math.random() - 0.5) * 3).toFixed(2));
+      const E5 = Number((p.actual * 0.9 + (Math.random() - 0.5) * 2.5).toFixed(2));
+      return { time: p.time, actual: p.actual, E1, E2, E3, E4, E5, predicted: p.predicted };
+    });
+  }, [forecastSeries]);
+
   // 偏差统计（正负相对/绝对偏差）
   const deviationStats = React.useMemo(() => {
     const relThresholds = [0.10, 0.20]; // 10%, 20%
@@ -1535,6 +1548,47 @@ output:
               </Card>
             ))}
           </div>
+
+          {/* 指标趋势折线图：RMSE & MAPE (%) */}
+          {/* 预测结果表：展示测试集数据与预测结果（最后一列） */}
+          <Card className="transition-all duration-200 hover:shadow-md border-gray-200">
+            <CardHeader>
+              <CardTitle>预测结果表</CardTitle>
+              <CardDescription>表格最后一列为预测结果，前面的列为测试集数据（示意）</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-auto">
+                <Table className="min-w-[960px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="whitespace-nowrap">时间</TableHead>
+                      <TableHead className="whitespace-nowrap">真实值</TableHead>
+                      <TableHead className="whitespace-nowrap">E1</TableHead>
+                      <TableHead className="whitespace-nowrap">E2</TableHead>
+                      <TableHead className="whitespace-nowrap">E3</TableHead>
+                      <TableHead className="whitespace-nowrap">E4</TableHead>
+                      <TableHead className="whitespace-nowrap">E5</TableHead>
+                      <TableHead className="whitespace-nowrap text-right">预测结果</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {forecastingTestSetRows.slice(-40).map((row, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="text-gray-700 whitespace-nowrap">{row.time}</TableCell>
+                        <TableCell className="text-right">{row.actual.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{row.E1.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{row.E2.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{row.E3.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{row.E4.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{row.E5.toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-medium">{row.predicted.toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* 指标趋势折线图：RMSE & MAPE (%) */}
           <Card className="transition-all duration-200 hover:shadow-md border-gray-200">
