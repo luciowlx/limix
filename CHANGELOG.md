@@ -23,6 +23,16 @@
 ## 变更历史
 
 ### 2025-10-29
+- [Feat/TaskDetail/UI] 预测结果表：用真实测试集字段名替换 E1~E5，并新增分页器（每页 10 行，支持页码与省略显示）。
+  - 细节：
+    - 字段名来源：聚合 task.datasets 的 unionFields（过滤 id/time/date/timestamp 等字段）；若不足 5 列则使用特征权重 featureWeights 的字段名补齐。
+    - 表格数据：保留“时间/真实值/预测结果”，中间列为上述动态字段名对应的示例特征值（示意数据）。
+    - 分页：数据变化时自动回到第 1 页；页码区显示邻近页与首尾页，过长时使用省略号（ellipsis）。
+  - 涉及文件：
+    - src/components/TaskDetailFullPage.tsx
+  - 验证：运行 `npm run dev`，在 http://localhost:3002// 进入某个“时序预测”任务详情页，确认表格列名来自 unionFields（或权重补齐）且分页器可交互。
+
+### 2025-10-29
 - [Fix/UI] 输出配置：将“绝对偏差阈值(±%)”的标签文案去掉最后的百分号，改为“绝对偏差阈值(±)”。不影响输入值与保存逻辑。
   - 涉及文件：
     - src/components/TaskManagement.tsx（forecasting/regression 两处标签）
