@@ -3590,7 +3590,7 @@ interface FormData {
                                     />
                                   </div>
                                   <div>
-                                    <Label htmlFor="fct-abs-dev" className="text-sm">绝对偏差阈值(±%)</Label>
+                                    <Label htmlFor="fct-abs-dev" className="text-sm">绝对偏差阈值(±)</Label>
                                     <Input
                                       id="fct-abs-dev"
                                       type="number"
@@ -3976,7 +3976,7 @@ interface FormData {
                                     />
                                   </div>
                                   <div>
-                                    <Label htmlFor="reg-abs-dev" className="text-sm">绝对偏差阈值(±%)</Label>
+                                    <Label htmlFor="reg-abs-dev" className="text-sm">绝对偏差阈值(±)</Label>
                                     <Input
                                       id="reg-abs-dev"
                                       type="number"
