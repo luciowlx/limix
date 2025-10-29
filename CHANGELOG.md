@@ -23,6 +23,18 @@
 ## 变更历史
 
 ### 2025-10-29
+- [Feat/TaskDetail/Export] 预测结果表支持“一键导出 CSV”（utf-8-sig + BOM），导出列顺序与页面一致，并采用整表数据（不受分页限制）。
+  - 细节：
+    - 文件编码：utf-8-sig（含 BOM）以便 Excel/中文环境无乱码；首行表头包含“时间/真实值/预测结果”与中间的测试集特征列。
+    - 列顺序：与 UI 保持一致（时间 → 真实值 → 特征列 → 预测结果）；字段名来自 `testFeatureFieldNames`。
+    - 文件命名：`forecasting_results_<taskId>_<timestamp>.csv`；直接触发浏览器下载。
+    - 数据范围：导出整表数据（`forecastingTestSetRows` 全量），与当前页码无关。
+  - 涉及文件：
+    - src/components/TaskDetailFullPage.tsx（新增 handleDownloadForecastCSV，并在卡片右上角加入“导出 CSV”按钮）
+  - 说明/验证：运行 `npm run dev` 打开 http://localhost:3003/，进入“任务详情（时序预测）”点击“导出 CSV”按钮，下载文件可在 Excel 正常打开且中文不乱码。
+
+
+### 2025-10-29
 - [Feat/TaskDetail/UI] 预测结果表：用真实测试集字段名替换 E1~E5，并新增分页器（每页 10 行，支持页码与省略显示）。
   - 细节：
     - 字段名来源：聚合 task.datasets 的 unionFields（过滤 id/time/date/timestamp 等字段）；若不足 5 列则使用特征权重 featureWeights 的字段名补齐。

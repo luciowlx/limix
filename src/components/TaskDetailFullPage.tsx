@@ -545,9 +545,6 @@ output:
       { id: 'Z3', x: 420, y: 60 },
       { id: 'X', x: 240, y: 160 },
       { id: 'Y', x: 240, y: 260 },
-      { id: 'U1', x: 420, y: 20 },
-      { id: 'U2a', x: 60, y: 20 },
-      { id: 'U2b', x: 420, y: 260 },
     ],
     edges: [
       { from: 'Z1', to: 'X', strength: 0.4 },
@@ -557,9 +554,6 @@ output:
       { from: 'Z1', to: 'Y', strength: 0.3 },
       { from: 'Z2', to: 'Y', strength: 0.2 },
       { from: 'Z3', to: 'Y', strength: 0.35 },
-      { from: 'U1', to: 'Z3', strength: 0.25 },
-      { from: 'U2a', to: 'Z1', strength: 0.2 },
-      { from: 'U2b', to: 'Y', strength: 0.3 },
     ],
   };
 
@@ -745,6 +739,52 @@ output:
   }, [totalRows]);
   const startIndex = (resultPage - 1) * pageSize;
   const currentRows = forecastingTestSetRows.slice(startIndex, startIndex + pageSize);
+  // 导出：预测结果表 CSV（utf-8-sig）
+  const handleDownloadForecastCSV = React.useCallback(() => {
+    try {
+      // 列顺序与表格一致：时间、测试集真实字段、真实值、预测结果
+      const columns: string[] = ['time', ...testFeatureFieldNames, 'actual', 'predicted'];
+      const header = columns.join(',');
+
+      // 构造 CSV 行，进行基础的转义处理
+      const esc = (v: any) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        // 如果包含逗号、双引号或换行，则用双引号包裹，并转义其中的双引号
+        if (/[,"\n]/.test(s)) {
+          return '"' + s.replace(/"/g, '""') + '"';
+        }
+        return s;
+      };
+
+      const lines = forecastingTestSetRows.map((row) => {
+        return columns.map((col) => esc(row[col])).join(',');
+      });
+
+      const csvContent = [header, ...lines].join('\n');
+      // 关键：在内容前添加 BOM，以实现 utf-8-sig
+      const BOM = '\uFEFF';
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+
+      // 生成文件名：taskName 优先，其次使用 id
+      const safeName = (task.taskName || task.id || 'forecast_results')
+        .replace(/[^a-zA-Z0-9_\-]+/g, '_')
+        .slice(0, 60);
+      const filename = `forecast_results_${safeName}.csv`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('导出 CSV 失败:', err);
+      toast.error('导出 CSV 失败');
+    }
+  }, [forecastingTestSetRows, testFeatureFieldNames, task.taskName, task.id]);
   const pageNumbers: Array<number | 'ellipsis'> = React.useMemo(() => {
     const arr: Array<number | 'ellipsis'> = [];
     if (pageCount <= 7) {
@@ -1599,31 +1639,61 @@ output:
           {/* 预测结果表：展示测试集数据与预测结果（最后一列） */}
           <Card className="transition-all duration-200 hover:shadow-md border-gray-200">
             <CardHeader>
-              <CardTitle>预测结果表</CardTitle>
-              <CardDescription>最后一列为预测结果，前面的列为测试集的实际字段（默认每页 10 行，可分页查看更多）</CardDescription>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <CardTitle>预测结果表</CardTitle>
+                  <CardDescription>最后一列为预测结果，前面的列为测试集的实际字段（默认每页 10 行，可分页查看更多）</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleDownloadForecastCSV} className="shrink-0">
+                  <Download className="mr-2 h-4 w-4" />
+                  导出 CSV
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-auto">
-                <Table className="min-w-[960px]">
+              <div className="relative overflow-auto" style={{ contentVisibility: 'auto' }}>
+                <Table className="min-w-[1040px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="whitespace-nowrap">时间</TableHead>
-                      <TableHead className="whitespace-nowrap">真实值</TableHead>
+                      <TableHead className="sticky top-0 bg-white z-10 whitespace-nowrap">时间</TableHead>
                       {testFeatureFieldNames.map((name) => (
-                        <TableHead key={name} className="whitespace-nowrap">{name}</TableHead>
+                        <TableHead key={name} className="sticky top-0 bg-white z-10 whitespace-nowrap">{name}</TableHead>
                       ))}
-                      <TableHead className="whitespace-nowrap text-right">预测结果</TableHead>
+                      {/* 固定右侧的两列：真实值、预测结果 */}
+                      <TableHead
+                        className="sticky top-0 bg-slate-50 z-20 whitespace-nowrap text-right border-l border-gray-200 w-32"
+                        style={{ right: '8rem' }}
+                      >
+                        真实值
+                      </TableHead>
+                      <TableHead
+                        className="sticky top-0 bg-slate-100 z-30 whitespace-nowrap text-right w-32"
+                        style={{ right: 0 }}
+                      >
+                        预测结果
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {currentRows.map((row, idx) => (
                       <TableRow key={idx}>
                         <TableCell className="text-gray-700 whitespace-nowrap">{row.time}</TableCell>
-                        <TableCell className="text-right">{row.actual.toFixed(2)}</TableCell>
                         {testFeatureFieldNames.map((name) => (
                           <TableCell key={name} className="text-right">{Number(row[name]).toFixed(2)}</TableCell>
                         ))}
-                        <TableCell className="text-right font-medium">{row.predicted.toFixed(2)}</TableCell>
+                        {/* 固定右侧的两列：真实值、预测结果 */}
+                        <TableCell
+                          className="sticky bg-slate-50 text-right border-l border-gray-200 w-32"
+                          style={{ right: '8rem' }}
+                        >
+                          {row.actual.toFixed(2)}
+                        </TableCell>
+                        <TableCell
+                          className="sticky bg-slate-100 text-right font-medium w-32"
+                          style={{ right: 0 }}
+                        >
+                          {row.predicted.toFixed(2)}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1636,6 +1706,7 @@ output:
                     <PaginationItem>
                       <PaginationPrevious
                         href="#"
+                        size="default"
                         onClick={(e) => { e.preventDefault(); setResultPage(Math.max(1, resultPage - 1)); }}
                       />
                     </PaginationItem>
@@ -1649,6 +1720,7 @@ output:
                           <PaginationLink
                             href="#"
                             isActive={p === resultPage}
+                            size="default"
                             onClick={(e) => { e.preventDefault(); setResultPage(p as number); }}
                           >
                             {p}
@@ -1659,6 +1731,7 @@ output:
                     <PaginationItem>
                       <PaginationNext
                         href="#"
+                        size="default"
                         onClick={(e) => { e.preventDefault(); setResultPage(Math.min(pageCount, resultPage + 1)); }}
                       />
                     </PaginationItem>
@@ -2582,12 +2655,8 @@ output:
                           const color = e.strength > 0.5 ? '#0ea5e9' : '#64748b';
                           return (
                             <g key={idx}>
-                              <defs>
-                                <marker id={`arrow-${idx}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                                  <path d="M0,0 L0,6 L6,3 z" fill={color} />
-                                </marker>
-                              </defs>
-                              <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={color} strokeWidth={width} markerEnd={`url(#arrow-${idx})`} />
+                              {/* 仅显示连接线，不展示箭头 */}
+                              <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={color} strokeWidth={width} />
                               <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6} fontSize="10" fill="#334155">{e.strength.toFixed(2)}</text>
                             </g>
                           );
