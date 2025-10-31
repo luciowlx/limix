@@ -95,6 +95,8 @@ export default function App() {
   // 全页面视图状态
   const [fullPageViewType, setFullPageViewType] = useState<'personal-center' | 'personalization-settings' | 'notification-center' | 'ai-assistant' | 'data-detail' | 'task-detail' | null>(null);
   const [isReportViewOpen, setIsReportViewOpen] = useState(false);
+  // 新增：通知中心初始页签（notifications/activity），用于从看板打开活动中心
+  const [notificationCenterInitialTab, setNotificationCenterInitialTab] = useState<'notifications' | 'activity' | null>(null);
 
   // 数据详情全页面状态
   const [selectedDatasetForFullPage, setSelectedDatasetForFullPage] = useState<any>(null);
@@ -417,7 +419,19 @@ export default function App() {
 
   // 通知中心处理函数
   const handleOpenNotificationCenter = () => {
+    setNotificationCenterInitialTab('notifications');
     setFullPageViewType('notification-center');
+  };
+
+  // 活动中心处理函数：打开通知中心并切换到“活动”Tab
+  const handleOpenActivityCenter = () => {
+    setNotificationCenterInitialTab('activity');
+    setFullPageViewType('notification-center');
+  };
+
+  // 项目管理总览：切换到“项目管理”标签，不弹创建项目弹窗
+  const handleGoToProjectOverview = () => {
+    setActiveTab("项目管理");
   };
 
   // 关闭全页面视图
@@ -427,6 +441,8 @@ export default function App() {
     setSelectedTaskForFullPage(null);
     // 同步重置数据详情初始页签
     setDataDetailInitialTab(null);
+    // 重置通知中心初始页签
+    setNotificationCenterInitialTab(null);
   };
 
   // 数据详情全页面处理函数
@@ -487,6 +503,10 @@ export default function App() {
                 setActiveTab("模型管理");
                 setShowModelTuning(true);
               }}
+              // 新增：从看板打开统一活动中心
+              onOpenActivityCenter={handleOpenActivityCenter}
+              // 新增：最近项目-查看全部 跳转到项目管理总览
+              onNavigateToProjectOverview={handleGoToProjectOverview}
             />
           </div>
         );
@@ -1425,6 +1445,7 @@ export default function App() {
         <FullPageView 
           type={fullPageViewType}
           onClose={handleCloseFullPageView}
+          notificationCenterInitialTab={notificationCenterInitialTab ?? 'notifications'}
         />
       )}
 

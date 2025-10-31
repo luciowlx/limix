@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { IndustryCharts } from "./IndustryCharts";
+import { useLanguage } from "../i18n/LanguageContext";
 import { 
   ArrowLeft,
   Play,
@@ -32,6 +33,7 @@ export function TaskDetail({ taskId, onBack }: TaskDetailProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const itemsPerPage = 10;
+  const { t } = useLanguage();
 
   // 模拟工业场景任务数据
   const getTaskData = (taskId: string) => {
@@ -426,7 +428,7 @@ export function TaskDetail({ taskId, onBack }: TaskDetailProps) {
                         className="text-xs text-gray-500 hover:text-gray-700"
                         onClick={() => setSelectedTags([])}
                       >
-                        清除全部
+                        {t("common.clearAll")}
                       </Button>
                     </div>
                   )}

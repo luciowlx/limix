@@ -50,6 +50,7 @@ function ChartContainer({
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [fallbackSize, setFallbackSize] = React.useState<{ width: number; height: number } | null>(null);
+  const MIN_WIDTH_THRESHOLD = 160; // 当容器宽度低于该值时启用兜底尺寸
 
   // Measure container size; if width/height are 0 (common in certain flex/grid layouts),
   // provide a numeric fallback so Recharts can render reliably.
@@ -60,9 +61,10 @@ function ChartContainer({
       const rect = el.getBoundingClientRect();
       const h = rect.height;
       const w = rect.width;
-      if (h <= 0 || w <= 0) {
-        // Fallback to a reasonable default size
-        setFallbackSize({ width: 640, height: 240 });
+      if (h <= 0 || w <= 0 || w < MIN_WIDTH_THRESHOLD) {
+        // 小宽度兜底：在父容器尚未正确分配宽度或宽度过窄时，使用固定尺寸
+        const fh = h > 0 ? Math.max(h, 220) : 240;
+        setFallbackSize({ width: 640, height: fh });
       } else {
         setFallbackSize(null);
       }
@@ -81,7 +83,7 @@ function ChartContainer({
         data-chart={chartId}
         ref={containerRef}
         className={cn(
-          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border flex w-full min-h-[220px] justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden",
+          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border relative w-full min-w-0 min-h-[220px] text-xs overflow-x-auto overflow-y-hidden [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden",
           className,
         )}
         {...props}

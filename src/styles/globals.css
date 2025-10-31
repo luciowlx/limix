@@ -187,3 +187,19 @@
 html {
   font-size: var(--font-size);
 }
+
+/* 视图切换过渡效果：轻微位移+透明度淡入 */
+.fade-in {
+  animation: fade-in-keyframes 180ms ease-out;
+}
+
+@keyframes fade-in-keyframes {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

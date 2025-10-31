@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
+import { useLanguage } from "../i18n/LanguageContext";
 import type { DateRange } from "react-day-picker";
 import { formatYYYYMMDD, parseDateFlexible, toDateOnly, toEndOfDay, isDateWithinRange } from "../utils/date";
 
@@ -109,6 +110,7 @@ export function DataManagement({
   onUploadDialogClose,
   onOpenDataDetailFullPage
 }: DataManagementProps = {}) {
+  const { lang, t } = useLanguage();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isLocalUploadDialogOpen, setIsLocalUploadDialogOpen] = useState(false);
   const [isAddDataSourceModalOpen, setIsAddDataSourceModalOpen] = useState(false);
@@ -131,7 +133,12 @@ export function DataManagement({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [sortBy, setSortBy] = useState('name');
+  // 列表排序：移除顶部“名称/大小/行数”选择，但保留列表/表头点击排序能力，默认按更新时间倒序
+  type SortField = 'name' | 'size' | 'rows' | 'updateTime';
+  const SORTABLE_COLUMNS = ['name', 'size', 'rows', 'updateTime'] as const;
+  const isSortField = (col: string): col is SortField => (SORTABLE_COLUMNS as readonly string[]).includes(col);
+  const isSortOrder = (o: string): o is 'asc' | 'desc' => o === 'asc' || o === 'desc';
+  const [sortBy, setSortBy] = useState<SortField>('updateTime');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   
   // 分页状态
@@ -282,21 +289,23 @@ export function DataManagement({
     setPreprocessingTasks(prev => prev.map(t => (
       t.id === id ? { ...t, status: 'running', progress: 0, startTime: new Date().toISOString(), completedAt: null } : t
     )));
-    toast.success('任务已开始执行');
+    toast.success(t('data.toast.taskStart'));
   };
 
   const handleStopTask = (id: number) => {
     setPreprocessingTasks(prev => prev.map(t => (
       t.id === id ? { ...t, status: 'failed', progress: undefined, completedAt: new Date().toISOString() } : t
     )));
-    toast.success('任务已停止');
+    toast.success(t('data.toast.taskStop'));
   };
 
   const handleViewTask = (id: number) => {
     const task = preprocessingTasks.find(t => t.id === id);
     if (task) {
       // 展示任务ID而非任务名称
-      toast.info(`查看任务详情：任务ID ${task.id}`);
+      toast.info(t('task.actions.viewDetail'), {
+        description: `${t('task.toast.viewDetailIdPrefix')} ${task.id}`
+      });
       // 这里可扩展：打开全屏详情页或任务详情弹窗
     }
   };
@@ -305,13 +314,13 @@ export function DataManagement({
     setPreprocessingTasks(prev => prev.map(t => (
       t.id === id ? { ...t, status: 'running', progress: 0, startTime: new Date().toISOString(), completedAt: null } : t
     )));
-    toast.success('已重新开始处理任务');
+    toast.success(t('data.toast.taskRetry'));
   };
 
   const handleCopyRules = (id: number) => {
     const task = preprocessingTasks.find(t => t.id === id);
     if (!task) return;
-    toast.success('已复制预处理规则为新模板');
+  toast.success(t('data.toast.copyRulesToTemplateSuccess'));
   };
 
   const handleEditTask = (id: number) => {
@@ -324,7 +333,7 @@ export function DataManagement({
 
   const handleDeleteTask = (id: number) => {
     setPreprocessingTasks(prev => prev.filter(t => t.id !== id));
-    toast.success('已删除任务');
+  toast.success(t('data.toast.taskDeleteSuccess'));
   };
 
   const handleDatasetClick = (datasetName: string) => {
@@ -332,7 +341,9 @@ export function DataManagement({
     if (ds) {
       handleViewDataDetail(ds.id);
     } else {
-      toast.info(`数据集未找到：${datasetName}`);
+      toast.info(t('data.toast.datasetNotFound'), {
+        description: `${t('data.toast.datasetNotFound.prefix')} ${datasetName}`
+      });
     }
   };
 
@@ -419,22 +430,22 @@ export function DataManagement({
 
   const stats = [
     {
-      label: "总数据集",
+      label: t("data.stats.totalDatasets"),
       value: "156",
       icon: Database
     },
     {
-      label: "今日上传",
+      label: t("data.stats.uploadsToday"),
       value: "12",
       icon: Upload
     },
     {
-      label: "导入中",
+      label: t("data.stats.importing"),
       value: "8",
       icon: Clock
     },
     {
-      label: "总存储",
+      label: t("data.stats.totalStorage"),
       value: "2.4TB",
       icon: FileText
     }
@@ -446,10 +457,16 @@ export function DataManagement({
       const matchesSearch = dataset.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            dataset.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = !statusFilter || dataset.status === statusFilter;
-      const matchesSource = !sourceFilter || 
-                           (sourceFilter === 'upload' && dataset.source.includes('上传')) ||
-                           (sourceFilter === 'api' && dataset.source.includes('API')) ||
-                           (sourceFilter === 'database' && dataset.source.includes('数据库'));
+      // 统一来源匹配，兼容中英文与不同展示标签
+      const normalizeSourceLabel = (s: string): 'upload' | 'subscription' | 'api' | 'database' | 'unknown' => {
+        const lower = (s || '').toLowerCase();
+        if (lower.includes('上传') || lower.includes('upload')) return 'upload';
+        if (lower.includes('订阅') || lower.includes('subscription')) return 'subscription';
+        if (lower.includes('api')) return 'api';
+        if (lower.includes('数据库') || lower.includes('database')) return 'database';
+        return 'unknown';
+      };
+      const matchesSource = !sourceFilter || normalizeSourceLabel(dataset.source) === sourceFilter;
       
       // 高级筛选
       const sizeInMB = parseFloat(dataset.size.replace('MB', ''));
@@ -483,7 +500,8 @@ export function DataManagement({
       return matchesSearch && matchesStatus && matchesSource && matchesAdvanced;
     })
     .sort((a, b) => {
-      let aValue, bValue;
+      let aValue: any;
+      let bValue: any;
       switch (sortBy) {
         case 'name':
           aValue = a.title;
@@ -498,10 +516,10 @@ export function DataManagement({
           bValue = parseInt(b.rows.replace(/,/g, ''));
           break;
         default:
-          aValue = new Date(a.updateTime);
-          bValue = new Date(b.updateTime);
+          aValue = parseDateFlexible(a.updateTime) ?? new Date(0);
+          bValue = parseDateFlexible(b.updateTime) ?? new Date(0);
       }
-      
+
       if (sortOrder === 'asc') {
         return aValue > bValue ? 1 : -1;
       } else {
@@ -549,7 +567,11 @@ export function DataManagement({
   };
 
   const handleConfirmDelete = () => {
-    toast.success(`已删除 ${deleteTarget.ids.length} 个数据集`);
+  toast.success(t('data.toast.batchDeleteSuccess'), {
+    description: lang === 'zh' 
+      ? `已删除 ${deleteTarget.ids.length} 个数据集`
+      : `Deleted ${deleteTarget.ids.length} datasets`
+  });
     setSelectedDatasets([]);
     setIsDeleteConfirmOpen(false);
   };
@@ -575,7 +597,7 @@ export function DataManagement({
       )
     );
 
-    toast.success("数据集已更新");
+    toast.success(t('data.toast.datasetUpdateSuccess'));
     setIsEditDialogOpen(false);
     setEditingDataset(null);
   };
@@ -607,7 +629,11 @@ export function DataManagement({
     // 添加到数据集列表
     setDatasets(prevDatasets => [...prevDatasets, newDataset]);
 
-    toast.success(`已复制数据集：${newDataset.title}`);
+  toast.success(t('data.toast.copyDatasetSuccess'), {
+    description: lang === 'zh' 
+      ? `已复制数据集：${newDataset.title}`
+      : `Copied dataset: ${newDataset.title}`
+  });
     setIsCopyDialogOpen(false);
     setCopyingDataset(null);
   };
@@ -670,27 +696,39 @@ export function DataManagement({
   };
 
   const handleDownload = (id: number) => {
-    toast.success(`开始下载数据集 ${id}`);
+    toast.success(t('data.toast.downloadStart'), {
+      description: lang === 'zh' 
+        ? `数据集 ${id}`
+        : `Dataset ${id}`
+    });
   };
 
   const handleBatchDownload = () => {
-    toast.success(`开始批量下载 ${selectedDatasets.length} 个数据集`);
+    toast.success(t('data.toast.batchDownloadStart'), {
+      description: lang === 'zh'
+        ? `共 ${selectedDatasets.length} 个数据集`
+        : `Total ${selectedDatasets.length} datasets`
+    });
   };
 
   const handleBatchArchive = () => {
-    toast.success(`已归档 ${selectedDatasets.length} 个数据集`);
+    toast.success(t('data.toast.batchArchiveSuccess'), {
+      description: lang === 'zh'
+        ? `共 ${selectedDatasets.length} 个数据集`
+        : `Total ${selectedDatasets.length} datasets`
+    });
     setSelectedDatasets([]);
   };
 
   const handleRefreshData = () => {
-    toast.success("数据已刷新");
+    toast.success(t('data.toast.refreshSuccess'));
   };
 
   const handleResetFilters = () => {
     setSearchTerm('');
     setStatusFilter('');
     setSourceFilter('');
-    setSortBy('name');
+    setSortBy('updateTime');
     setSortOrder('desc');
     setAdvancedFilters({
       sizeRange: [0, 1000],
@@ -700,7 +738,7 @@ export function DataManagement({
       tagQuery: '',
       formats: []
     });
-    toast.success("筛选条件已重置");
+  toast.success(t('data.toast.filtersReset'));
   };
 
   // 新增：按状态的操作函数
@@ -714,7 +752,13 @@ export function DataManagement({
     if (cancelUploadTargetId === null) return;
     const dataset = datasets.find(d => d.id === cancelUploadTargetId);
     setDatasets(prev => prev.map(d => d.id === cancelUploadTargetId ? { ...d, status: 'failed', updateTime: new Date().toISOString() } : d));
-    toast.success('已取消上传', { description: dataset ? `已取消 ${dataset.title} 的上传（覆盖当前版本，不保留旧版本）` : '' });
+  toast.success(t('data.toast.cancelUploadSuccess'), {
+    description: dataset 
+      ? (lang === 'zh' 
+        ? `已取消 ${dataset.title} 的上传（覆盖当前版本，不保留旧版本）`
+        : `Cancelled upload for ${dataset.title} (overwrite current version, do not keep old version)`)
+      : ''
+  });
     setIsCancelUploadConfirmOpen(false);
     setCancelUploadTargetId(null);
   };
@@ -722,7 +766,11 @@ export function DataManagement({
   const handleReupload = (id: number) => {
     setReuploadTargetId(id);
     setIsLocalUploadDialogOpen(true);
-    toast.info('准备重新上传', { description: `请选择文件以重新上传数据集 ${id}` });
+  toast.info(t('data.toast.prepareReupload'), {
+    description: lang === 'zh'
+      ? `请选择文件以重新上传数据集 ${id}`
+      : `Please select a file to re-upload dataset ${id}`
+  });
   };
 
   const handleQuickPreprocess = (id: number) => {
@@ -738,8 +786,8 @@ export function DataManagement({
       {/* 页面标题和描述 */}
       <div className="space-y-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">数据管理</h1>
-          <p className="text-gray-600 mt-2">上传、管理和分析您的数据集，支持多种格式的结构化数据</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('data.title')}</h1>
+          <p className="text-gray-600 mt-2">{t('data.description')}</p>
         </div>
         
         {/* 二级菜单 */}
@@ -753,7 +801,7 @@ export function DataManagement({
             }`}
           >
             <Database className="w-4 h-4" />
-            <span>数据集</span>
+            <span>{t('data.submenu.datasets')}</span>
           </button>
           <button
             onClick={() => setActiveSubmenu('preprocessing')}
@@ -764,7 +812,7 @@ export function DataManagement({
             }`}
           >
             <Settings className="w-4 h-4" />
-            <span>数据预处理</span>
+            <span>{t('data.submenu.preprocessing')}</span>
           </button>
         </div>
       </div>
@@ -797,7 +845,7 @@ export function DataManagement({
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
           <input
             type="text"
-            placeholder="搜索数据集..."
+            placeholder={t('data.search.placeholder')}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -810,10 +858,10 @@ export function DataManagement({
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="">所有状态</option>
-            <option value="success">成功</option>
-            <option value="processing">导入中</option>
-            <option value="failed">失败</option>
+            <option value="">{t('data.status.all')}</option>
+            <option value="success">{t('data.status.success')}</option>
+            <option value="processing">{t('data.status.processing')}</option>
+            <option value="failed">{t('data.status.failed')}</option>
           </select>
           
           <select
@@ -821,10 +869,10 @@ export function DataManagement({
             value={sourceFilter}
             onChange={(e) => setSourceFilter(e.target.value)}
           >
-            <option value="">所有来源</option>
-            <option value="upload">上传</option>
-            <option value="api">API</option>
-            <option value="database">数据库</option>
+            <option value="">{t('data.source.all')}</option>
+            <option value="upload">{t('data.source.upload')}</option>
+            <option value="api">{t('data.source.api')}</option>
+            <option value="database">{t('data.source.database')}</option>
           </select>
 
           {/* 日期范围选择：更新时间 */}
@@ -837,7 +885,7 @@ export function DataManagement({
                 <CalendarIcon className="h-4 w-4 mr-2 text-gray-500" />
                 {advancedFilters.dateRange?.from && advancedFilters.dateRange?.to
                   ? `${formatYYYYMMDD(advancedFilters.dateRange.from)} - ${formatYYYYMMDD(advancedFilters.dateRange.to)}`
-                  : '开始日期 - 结束日期'}
+                  : t('data.dateRange.placeholder')}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
@@ -852,15 +900,7 @@ export function DataManagement({
             </PopoverContent>
           </Popover>
           
-          <select
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-          >
-            <option value="name">名称</option>
-            <option value="size">大小</option>
-            <option value="rows">行数</option>
-          </select>
+          {/* 已移除排序字段下拉框（名称/大小/行数），列表统一按更新时间倒序显示 */}
           
           <Button
             variant="outline"
@@ -868,7 +908,7 @@ export function DataManagement({
             onClick={() => setIsAdvancedFilterOpen(true)}
           >
             <Filter className="h-4 w-4 mr-2" />
-            高级筛选
+            {t('data.filter.advanced')}
           </Button>
           
           <Button
@@ -876,7 +916,7 @@ export function DataManagement({
             size="sm"
             onClick={handleResetFilters}
           >
-            重置
+            {t('common.reset')}
           </Button>
         </div>
       </div>
@@ -886,29 +926,29 @@ export function DataManagement({
         <div className="flex gap-2">
           <Button onClick={() => setIsLocalUploadDialogOpen(true)}>
             <Upload className="h-4 w-4 mr-2" />
-            上传数据集
+            {t('data.toolbar.uploadDataset')}
           </Button>
           <Button variant="outline" onClick={() => setIsDataSubscriptionOpen(true)}>
             <Database className="h-4 w-4 mr-2" />
-            新增数据源
+            {t('data.toolbar.newDatasource')}
           </Button>
           <Button variant="outline" onClick={() => setIsSubscriptionListOpen(true)}>
             <List className="h-4 w-4 mr-2" />
-            订阅管理
+            {t('data.toolbar.subscriptionMgmt')}
           </Button>
           {selectedDatasets.length > 0 && (
             <>
               <Button variant="outline" onClick={handleBatchDownload}>
                 <Download className="h-4 w-4 mr-2" />
-                批量下载
+                {t('data.toolbar.batchDownload')}
               </Button>
               <Button variant="outline" onClick={handleBatchArchive}>
                 <Archive className="h-4 w-4 mr-2" />
-                批量归档
+                {t('data.toolbar.batchArchive')}
               </Button>
               <Button variant="outline" onClick={handleBatchDelete}>
                 <Trash2 className="h-4 w-4 mr-2" />
-                批量删除
+                {t('data.toolbar.batchDelete')}
               </Button>
             </>
           )}
@@ -996,26 +1036,26 @@ export function DataManagement({
                 
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <span className="text-gray-500">格式:</span>
+  <span className="text-gray-500">{t('data.grid.format')}</span>
                     <span className="ml-1 font-medium">{dataset.format}</span>
                   </div>
                   <div>
-                    <span className="text-gray-500">大小:</span>
+  <span className="text-gray-500">{t('data.grid.size')}</span>
                     <span className="ml-1 font-medium">{dataset.size}</span>
                   </div>
                   <div>
-                    <span className="text-gray-500">行数:</span>
+  <span className="text-gray-500">{t('data.grid.rows')}</span>
                     <span className="ml-1 font-medium">{dataset.rows}</span>
                   </div>
                   <div>
-                    <span className="text-gray-500">列数:</span>
+  <span className="text-gray-500">{t('data.grid.columns')}</span>
                     <span className="ml-1 font-medium">{dataset.columns}</span>
                   </div>
                 </div>
                 
                 <div>
                   <div className="flex justify-between text-sm mb-1">
-                    <span className="text-gray-500">完整度</span>
+                    <span className="text-gray-500">{t('data.grid.completeness')}</span>
                     <span className="font-medium">{dataset.completeness}%</span>
                   </div>
                   <Progress value={dataset.completeness} className="h-2" />
@@ -1061,7 +1101,11 @@ export function DataManagement({
                     )}
                   </div>
                   <Badge variant={dataset.status === 'success' ? 'default' : dataset.status === 'processing' ? 'secondary' : 'destructive'}>
-                    {dataset.status === 'success' ? '成功' : dataset.status === 'processing' ? '导入中' : '失败'}
+  {dataset.status === 'success' 
+    ? t('data.statusBadge.success') 
+    : dataset.status === 'processing' 
+      ? t('data.statusBadge.processing') 
+      : t('data.statusBadge.failed')}
                   </Badge>
                 </div>
               </CardContent>
@@ -1079,9 +1123,13 @@ export function DataManagement({
               enableColumnDrag
               sortState={{ column: sortBy, order: sortOrder }}
               onSortChange={(column, order) => {
-                if (["name", "size", "rows", "updateTime"].includes(column)) {
-                  setSortBy(column);
-                  setSortOrder(order);
+                const col = String(column);
+                const ord = String(order);
+                if (isSortField(col)) {
+                  setSortBy(col);
+                }
+                if (isSortOrder(ord)) {
+                  setSortOrder(ord);
                 }
               }}
               style={{ border: 'none' }}
@@ -1093,7 +1141,7 @@ export function DataManagement({
                     onChange={handleSelectAll}
                     className="rounded"
                   />
-                  全选当前结果
+                  {t('data.table.selectAllCurrent')}
                 </label>
               }
               columns={[
@@ -1112,7 +1160,7 @@ export function DataManagement({
                 },
                 columnSettings.name ? {
                   key: 'name',
-                  label: '名称',
+                  label: t('data.columns.name'),
                   sortable: true,
                   render: (_v: any, row: any) => (
                     <span className="font-medium">{row.title}</span>
@@ -1120,14 +1168,14 @@ export function DataManagement({
                 } : undefined,
                 columnSettings.description ? {
                   key: 'description',
-                  label: '描述',
+                  label: t('data.columns.description'),
                   render: (v: any) => (
                     <span className="max-w-xs truncate inline-block align-middle">{v}</span>
                   )
                 } : undefined,
                 columnSettings.categories ? {
                   key: 'categories',
-                  label: '标签',
+                  label: t('data.columns.tags'),
                   render: (_v: any, row: any) => (
                     <div className="flex flex-wrap gap-1">
                       {row.tags.map((tag: any, index: number) => (
@@ -1136,13 +1184,13 @@ export function DataManagement({
                     </div>
                   )
                 } : undefined,
-                columnSettings.format ? { key: 'format', label: '格式' } : undefined,
-                columnSettings.size ? { key: 'size', label: '大小', sortable: true } : undefined,
-                columnSettings.rows ? { key: 'rows', label: '行数', sortable: true } : undefined,
-                columnSettings.columns ? { key: 'columns', label: '列数' } : undefined,
+                columnSettings.format ? { key: 'format', label: t('data.columns.format') } : undefined,
+                columnSettings.size ? { key: 'size', label: t('data.columns.size'), sortable: true } : undefined,
+                columnSettings.rows ? { key: 'rows', label: t('data.columns.rows'), sortable: true } : undefined,
+                columnSettings.columns ? { key: 'columns', label: t('data.columns.columns') } : undefined,
                 columnSettings.completeness ? {
                   key: 'completeness',
-                  label: '完整度',
+                  label: t('data.columns.completeness'),
                   render: (v: any) => (
                     <div className="flex items-center space-x-2">
                       <Progress value={v} className="h-2 w-16" />
@@ -1150,21 +1198,21 @@ export function DataManagement({
                     </div>
                   )
                 } : undefined,
-                columnSettings.source ? { key: 'source', label: '来源' } : undefined,
-                columnSettings.version ? { key: 'version', label: '版本' } : undefined,
-                columnSettings.updateTime ? { key: 'updateTime', label: '更新时间', sortable: true, render: (v: any) => formatYYYYMMDD(v) } : undefined,
+                columnSettings.source ? { key: 'source', label: t('data.columns.source') } : undefined,
+                columnSettings.version ? { key: 'version', label: t('data.columns.version') } : undefined,
+                columnSettings.updateTime ? { key: 'updateTime', label: t('data.columns.updateTime'), sortable: true, render: (v: any) => formatYYYYMMDD(v) } : undefined,
                 columnSettings.status ? {
                   key: 'status',
-                  label: '状态',
+                  label: t('data.columns.status'),
                   render: (v: any) => (
                     <Badge variant={v === 'success' ? 'default' : v === 'processing' ? 'secondary' : 'destructive'}>
-                      {v === 'success' ? '成功' : v === 'processing' ? '导入中' : '失败'}
+                      {v === 'success' ? t('data.statusBadge.success') : v === 'processing' ? t('data.statusBadge.processing') : t('data.statusBadge.failed')}
                     </Badge>
                   )
                 } : undefined,
                 columnSettings.actions ? {
                   key: 'actions',
-                  label: '操作',
+                  label: t('data.columns.actions'),
                   render: (_v: any, row: any) => (
                     <div className="flex space-x-1">
                       {row.status === 'success' && (
@@ -1252,10 +1300,10 @@ export function DataManagement({
               onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
               disabled={currentPage === 1}
             >
-              上一页
+              {t('common.prev')}
             </Button>
             <span className="flex items-center px-3 py-1 text-sm">
-              第 {currentPage} 页，共 {totalPages} 页
+              {t('data.pagination.page')} {currentPage} / {totalPages}
             </span>
             <Button
               variant="outline"
@@ -1263,7 +1311,7 @@ export function DataManagement({
               onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage === totalPages}
             >
-              下一页
+              {t('common.next')}
             </Button>
           </div>
         </div>
@@ -1276,7 +1324,7 @@ export function DataManagement({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">高级筛选</h3>
+              <h3 className="text-lg font-semibold">{t('data.filter.title')}</h3>
               <Button
                 variant="ghost"
                 size="sm"
@@ -1289,11 +1337,11 @@ export function DataManagement({
             <div className="space-y-6">
               {/* 数据大小范围 */}
               <div>
-                <label className="block text-sm font-medium mb-2">数据大小 (MB)</label>
+                <label className="block text-sm font-medium mb-2">{t('data.filter.sizeRange')}</label>
                 <div className="flex items-center space-x-4">
                   <input
                     type="number"
-                    placeholder="最小值"
+                    placeholder={t('common.min')}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
                     value={advancedFilters.sizeRange[0]}
                     onChange={(e) => setAdvancedFilters(prev => ({
@@ -1304,7 +1352,7 @@ export function DataManagement({
                   <span>-</span>
                   <input
                     type="number"
-                    placeholder="最大值"
+                    placeholder={t('common.max')}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
                     value={advancedFilters.sizeRange[1]}
                     onChange={(e) => setAdvancedFilters(prev => ({
@@ -1317,11 +1365,11 @@ export function DataManagement({
 
               {/* 行数范围 */}
               <div>
-                <label className="block text-sm font-medium mb-2">行数</label>
+                <label className="block text-sm font-medium mb-2">{t('data.filter.rowsRange')}</label>
                 <div className="flex items-center space-x-4">
                   <input
                     type="number"
-                    placeholder="最小值"
+                    placeholder={t('common.min')}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
                     value={advancedFilters.rowsRange[0]}
                     onChange={(e) => setAdvancedFilters(prev => ({
@@ -1332,7 +1380,7 @@ export function DataManagement({
                   <span>-</span>
                   <input
                     type="number"
-                    placeholder="最大值"
+                    placeholder={t('common.max')}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
                     value={advancedFilters.rowsRange[1]}
                     onChange={(e) => setAdvancedFilters(prev => ({
@@ -1345,13 +1393,13 @@ export function DataManagement({
 
               {/* 完整度范围 */}
               <div>
-                <label className="block text-sm font-medium mb-2">完整度 (%)</label>
+                <label className="block text-sm font-medium mb-2">{t('data.filter.completenessRange')}</label>
                 <div className="flex items-center space-x-4">
                   <input
                     type="number"
                     min="0"
                     max="100"
-                    placeholder="最小值"
+                    placeholder={t('common.min')}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
                     value={advancedFilters.completenessRange[0]}
                     onChange={(e) => setAdvancedFilters(prev => ({
@@ -1364,7 +1412,7 @@ export function DataManagement({
                     type="number"
                     min="0"
                     max="100"
-                    placeholder="最大值"
+                    placeholder={t('common.max')}
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
                     value={advancedFilters.completenessRange[1]}
                     onChange={(e) => setAdvancedFilters(prev => ({
@@ -1377,11 +1425,11 @@ export function DataManagement({
 
               {/* 标签筛选（改为模糊搜索） */}
               <div>
-                <label className="block text-sm font-medium mb-2">标签（支持模糊搜索）</label>
+                <label className="block text-sm font-medium mb-2">{t('data.filter.tags')}</label>
                 <div className="space-y-2">
                   <input
                     type="text"
-                    placeholder="输入标签关键字，例如：清洗、实时、CSV..."
+                    placeholder={t('data.filter.tags.placeholder')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md"
                     value={advancedFilters.tagQuery}
                     onChange={(e) => setAdvancedFilters(prev => ({ ...prev, tagQuery: e.target.value }))}
@@ -1401,7 +1449,7 @@ export function DataManagement({
                           </button>
                         ))}
                       {availableTags.filter(tag => tag.toLowerCase().includes(advancedFilters.tagQuery.toLowerCase())).length === 0 && (
-                        <span className="text-xs text-gray-500">无匹配标签</span>
+                        <span className="text-xs text-gray-500">{t('data.filter.tags.noMatch')}</span>
                       )}
                     </div>
                   )}
@@ -1410,7 +1458,7 @@ export function DataManagement({
 
               {/* 格式筛选 */}
               <div>
-                <label className="block text-sm font-medium mb-2">格式</label>
+                <label className="block text-sm font-medium mb-2">{t('data.filter.formats')}</label>
                 <div className="flex flex-wrap gap-2">
                   {availableFormats.map(format => (
                     <label key={format} className="flex items-center space-x-2">
@@ -1452,10 +1500,10 @@ export function DataManagement({
                   });
                 }}
               >
-                重置
+                {t('common.clear')}
               </Button>
               <Button onClick={() => setIsAdvancedFilterOpen(false)}>
-                应用筛选
+                {t('common.apply')}
               </Button>
             </div>
           </div>
@@ -1467,7 +1515,7 @@ export function DataManagement({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">列设置</h3>
+              <h3 className="text-lg font-semibold">{t('data.columnsSettings.title')}</h3>
               <Button
                 variant="ghost"
                 size="sm"
@@ -1490,19 +1538,19 @@ export function DataManagement({
                   />
                   <span className="text-sm">
                     {key === 'id' ? 'ID' :
-                     key === 'name' ? '名称' :
-                     key === 'description' ? '描述' :
-                     key === 'categories' ? '标签' :
-                     key === 'format' ? '格式' :
-                     key === 'size' ? '大小' :
-                     key === 'rows' ? '行数' :
-                     key === 'columns' ? '列数' :
-                     key === 'completeness' ? '完整度' :
-                     key === 'source' ? '来源' :
-                     key === 'version' ? '版本' :
-                     key === 'updateTime' ? '更新时间' :
-                     key === 'status' ? '状态' :
-                     key === 'actions' ? '操作' : key}
+                     key === 'name' ? t('data.columns.name') :
+                     key === 'description' ? t('data.columns.description') :
+                     key === 'categories' ? t('data.columns.tags') :
+                     key === 'format' ? t('data.columns.format') :
+                     key === 'size' ? t('data.columns.size') :
+                     key === 'rows' ? t('data.columns.rows') :
+                     key === 'columns' ? t('data.columns.columns') :
+                     key === 'completeness' ? t('data.columns.completeness') :
+                     key === 'source' ? t('data.columns.source') :
+                     key === 'version' ? t('data.columns.version') :
+                     key === 'updateTime' ? t('data.columns.updateTime') :
+                     key === 'status' ? t('data.columns.status') :
+                     key === 'actions' ? t('data.columns.actions') : key}
                   </span>
                 </label>
               ))}
@@ -1530,10 +1578,10 @@ export function DataManagement({
                    });
                  }}
                >
-                 全选
+                 {t('data.columnsSettings.selectAll')}
                </Button>
               <Button onClick={() => setIsColumnSettingsOpen(false)}>
-                确定
+                {t('common.confirm')}
               </Button>
             </div>
           </div>
@@ -1546,13 +1594,13 @@ export function DataManagement({
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex items-center space-x-3 mb-4">
               <AlertTriangle className="h-6 w-6 text-red-500" />
-              <h3 className="text-lg font-semibold">确认删除</h3>
+              <h3 className="text-lg font-semibold">{t('data.confirm.delete.title')}</h3>
             </div>
             
             <p className="text-gray-600 mb-6">
               {deleteTarget.type === 'single' 
-                ? '确定要删除这个数据集吗？此操作不可撤销。'
-                : `确定要删除选中的 ${deleteTarget.ids.length} 个数据集吗？此操作不可撤销。`
+  ? t('data.confirm.delete.message')
+  : t('data.confirm.delete.message')
               }
             </p>
 
@@ -1561,13 +1609,13 @@ export function DataManagement({
                 variant="outline"
                 onClick={() => setIsDeleteConfirmOpen(false)}
               >
-                取消
+                {t('common.cancel')}
               </Button>
               <Button
                 variant="destructive"
                 onClick={handleConfirmDelete}
               >
-                确认删除
+                {t('data.confirm.delete.confirmButton') ?? t('common.confirm')}
               </Button>
             </div>
           </div>
@@ -1580,11 +1628,11 @@ export function DataManagement({
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex items-center space-x-3 mb-4">
               <AlertTriangle className="h-6 w-6 text-amber-500" />
-              <h3 className="text-lg font-semibold">确认取消上传</h3>
+              <h3 className="text-lg font-semibold">{t('data.confirm.cancelUpload.title')}</h3>
             </div>
             
             <p className="text-gray-600 mb-6">
-              确定要取消该数据集的上传吗？此操作将立即终止上传，并将状态标记为“失败”。此操作不可撤销。
+              {t('data.confirm.cancelUpload.message')}
             </p>
 
             <div className="flex justify-end space-x-2">
@@ -1592,13 +1640,13 @@ export function DataManagement({
                 variant="outline"
                 onClick={() => { setIsCancelUploadConfirmOpen(false); setCancelUploadTargetId(null); }}
               >
-                取消
+                {t('common.cancel')}
               </Button>
               <Button
                 variant="destructive"
                 onClick={handleConfirmCancelUpload}
               >
-                确认取消上传
+                {t('common.confirm')}
               </Button>
             </div>
           </div>
@@ -1619,13 +1667,13 @@ export function DataManagement({
           if (reuploadTargetId !== null) {
             // 重新上传：更新对应数据集状态为成功
             setDatasets(prev => prev.map(d => d.id === reuploadTargetId ? { ...d, status: 'success', updateTime: new Date().toISOString() } : d));
-            toast.success('重新上传成功', {
-              description: `数据集 ${reuploadTargetId} 已重新上传完成`
+            toast.success(t('data.toast.reuploadSuccess'), {
+              description: `${t('data.toast.reuploadSuccess.prefix')} ${reuploadTargetId} ${t('data.toast.reuploadSuccess.suffix')}`
             });
             setReuploadTargetId(null);
           } else {
-            toast.success('数据上传成功', {
-              description: `数据集 ${datasetId} 已成功创建`
+            toast.success(t('data.toast.uploadSuccess'), {
+              description: `${t('data.toast.uploadSuccess.prefix')} ${datasetId} ${t('data.toast.uploadSuccess.suffix')}`
             });
           }
           // 刷新数据列表
@@ -1638,8 +1686,8 @@ export function DataManagement({
         isOpen={isDataSubscriptionOpen}
         onClose={() => setIsDataSubscriptionOpen(false)}
         onSubscriptionSuccess={(subscriptionId) => {
-          toast.success('数据源创建成功', {
-            description: `数据源 ${subscriptionId} 已成功创建并开始同步`
+          toast.success(t('data.toast.datasourceCreateSuccess'), {
+            description: `${t('data.toast.datasourceCreateSuccess.prefix')} ${subscriptionId} ${t('data.toast.datasourceCreateSuccess.suffix')}`
           });
           // 刷新数据列表
           handleRefreshData();
@@ -1693,15 +1741,15 @@ export function DataManagement({
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>编辑数据集</DialogTitle>
+              <DialogTitle>{t('data.dialog.edit.title')}</DialogTitle>
               <DialogDescription>
-                修改数据集的基本信息和配置
+                {t('data.dialog.edit.description')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="edit-title">数据集名称</Label>
+                  <Label htmlFor="edit-title">{t('data.form.name')}</Label>
                   <Input
                     id="edit-title"
                     value={editingDataset.title}
@@ -1712,7 +1760,7 @@ export function DataManagement({
                   />
                 </div>
                 <div>
-                  <Label htmlFor="edit-source">数据源</Label>
+                  <Label htmlFor="edit-source">{t('data.form.source')}</Label>
                   <Select
                     value={editingDataset.source}
                     onValueChange={(value: string) => setEditingDataset({
@@ -1724,17 +1772,17 @@ export function DataManagement({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="上传">上传</SelectItem>
-                      <SelectItem value="订阅">订阅</SelectItem>
-                      <SelectItem value="API">API</SelectItem>
-                      <SelectItem value="数据库">数据库</SelectItem>
+                      <SelectItem value="上传">{t('data.source.upload')}</SelectItem>
+                      <SelectItem value="订阅">{t('data.source.subscription')}</SelectItem>
+                      <SelectItem value="API">{t('data.source.api')}</SelectItem>
+                      <SelectItem value="数据库">{t('data.source.database')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               
               <div>
-                <Label htmlFor="edit-description">描述</Label>
+                <Label htmlFor="edit-description">{t('data.form.description')}</Label>
                 <Textarea
                   id="edit-description"
                   value={editingDataset.description}
@@ -1748,12 +1796,12 @@ export function DataManagement({
 
               {/* 数据标签 */}
               <div className="space-y-2">
-                <Label>数据标签</Label>
+                <Label>{t('data.form.tags')}</Label>
                 <div className="space-y-3">
                   {/* 标签输入 */}
                   <div className="flex gap-2">
                     <Input
-                      placeholder="输入标签名称"
+                      placeholder={t('data.form.inputTagName')}
                       value={editNewTagName}
                       onChange={(e) => setEditNewTagName(e.target.value)}
                       onKeyPress={(e) => {
@@ -1770,7 +1818,7 @@ export function DataManagement({
                       disabled={!editNewTagName.trim()}
                       size="sm"
                     >
-                      添加
+                      {t('common.add')}
                     </Button>
                   </div>
                   
@@ -1798,7 +1846,7 @@ export function DataManagement({
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="edit-format">数据格式</Label>
+                  <Label htmlFor="edit-format">{t('data.form.format')}</Label>
                   <Select
                     value={editingDataset.format}
                     onValueChange={(value: string) => setEditingDataset({
@@ -1819,7 +1867,7 @@ export function DataManagement({
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="edit-version">版本</Label>
+                  <Label htmlFor="edit-version">{t('data.form.version')}</Label>
                   <Input
                     id="edit-version"
                     value={editingDataset.version}
@@ -1839,10 +1887,10 @@ export function DataManagement({
                     setEditingDataset(null);
                   }}
                 >
-                  取消
+                  {t('common.cancel')}
                 </Button>
                 <Button onClick={handleSaveEdit}>
-                  保存
+                  {t('common.save')}
                 </Button>
               </div>
             </div>
@@ -1855,14 +1903,14 @@ export function DataManagement({
         <Dialog open={isCopyDialogOpen} onOpenChange={setIsCopyDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>复制数据集</DialogTitle>
+              <DialogTitle>{t('data.dialog.copy.title')}</DialogTitle>
               <DialogDescription>
-                创建数据集的副本
+                {t('data.dialog.copy.description')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
-                <Label htmlFor="copy-title">数据集名称</Label>
+                <Label htmlFor="copy-title">{t('data.form.name')}</Label>
                 <Input
                   id="copy-title"
                   value={copyingDataset.title}
@@ -1874,7 +1922,7 @@ export function DataManagement({
               </div>
               
               <div>
-                <Label htmlFor="copy-description">描述</Label>
+                <Label htmlFor="copy-description">{t('data.form.description')}</Label>
                 <Textarea
                   id="copy-description"
                   value={copyingDataset.description}
@@ -1894,10 +1942,10 @@ export function DataManagement({
                     setCopyingDataset(null);
                   }}
                 >
-                  取消
+                  {t('common.cancel')}
                 </Button>
                 <Button onClick={handleSaveCopy}>
-                  创建副本
+                  {t('data.dialog.copy.createCopy')}
                 </Button>
               </div>
             </div>
@@ -1910,13 +1958,13 @@ export function DataManagement({
         <div className="space-y-6">
           {/* 标题与创建按钮 */}
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">预处理任务管理</h2>
+            <h2 className="text-xl font-semibold">{t('data.preprocessing.tasks')}</h2>
             <Button onClick={() => {
               setSelectedDatasetForPreprocessing(null);
               setIsDataPreprocessingOpen(true);
             }}>
               <Plus className="h-4 w-4 mr-2" />
-              创建预处理任务
+  {t('data.preprocessing.createTask')}
             </Button>
           </div>
 
@@ -1924,21 +1972,21 @@ export function DataManagement({
           <div className="flex flex-wrap items-center gap-3">
             <Select value={taskFilters.status} onValueChange={(v: 'all' | 'success' | 'running' | 'pending' | 'failed') => setTaskFilters(prev => ({...prev, status: v }))}>
               <SelectTrigger className="w-36">
-                <SelectValue placeholder="状态" />
+  <SelectValue placeholder={t('task.filters.status')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="running">进行中</SelectItem>
-                <SelectItem value="pending">待执行</SelectItem>
-                <SelectItem value="success">已完成</SelectItem>
-                <SelectItem value="failed">失败</SelectItem>
+  <SelectItem value="all">{t('task.filters.status.all')}</SelectItem>
+  <SelectItem value="running">{t('task.filters.status.running')}</SelectItem>
+  <SelectItem value="pending">{t('task.filters.status.pending')}</SelectItem>
+  <SelectItem value="success">{t('task.filters.status.completed')}</SelectItem>
+  <SelectItem value="failed">{t('task.filters.status.failed')}</SelectItem>
               </SelectContent>
             </Select>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm" className="flex items-center gap-2">
                   <CalendarIcon className="h-4 w-4" />
-                  {taskFilters.dateRange ? `${formatYYYYMMDD(taskFilters.dateRange.from)} ~ ${formatYYYYMMDD(taskFilters.dateRange.to)}` : '创建时间范围'}
+                  {taskFilters.dateRange ? `${formatYYYYMMDD(taskFilters.dateRange.from)} ~ ${formatYYYYMMDD(taskFilters.dateRange.to)}` : t('task.filters.createdAtRange')}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -1949,13 +1997,13 @@ export function DataManagement({
                   initialFocus
                 />
                 <div className="p-2 flex justify-end">
-                  <Button variant="ghost" size="sm" onClick={() => setTaskFilters(prev => ({...prev, dateRange: null}))}>清除</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setTaskFilters(prev => ({...prev, dateRange: null}))}>{t('common.clear')}</Button>
                 </div>
               </PopoverContent>
             </Popover>
             <div className="flex-1 min-w-[200px]">
               <Input
-                placeholder="按任务ID或数据集搜索"
+  placeholder={t('task.filters.search.placeholder')}
                 value={taskFilters.datasetQuery}
                 onChange={(e) => setTaskFilters(prev => ({...prev, datasetQuery: e.target.value}))}
               />
@@ -1967,14 +2015,14 @@ export function DataManagement({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>任务ID</TableHead>
-                  <TableHead>数据集</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>操作内容</TableHead>
-                  <TableHead>开始时间</TableHead>
-                  <TableHead>完成时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
+  <TableHead>{t('data.preprocessing.table.taskId')}</TableHead>
+  <TableHead>{t('data.preprocessing.table.dataset')}</TableHead>
+  <TableHead>{t('data.preprocessing.table.type')}</TableHead>
+                  <TableHead>{t('data.preprocessing.table.status')}</TableHead>
+  <TableHead>{t('data.preprocessing.table.operation')}</TableHead>
+  <TableHead>{t('data.preprocessing.table.startTime')}</TableHead>
+  <TableHead>{t('data.preprocessing.table.endTime')}</TableHead>
+  <TableHead className="text-right">{t('data.preprocessing.table.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1989,14 +2037,14 @@ export function DataManagement({
                     <TableCell>{task.type}</TableCell>
                     <TableCell>
                       {task.status === 'success' && (
-                        <Badge variant="default">已完成</Badge>
+  <Badge variant="default">{t('task.filters.status.completed')}</Badge>
                       )}
                       {task.status === 'failed' && (
-                        <Badge variant="destructive">失败</Badge>
+  <Badge variant="destructive">{t('task.filters.status.failed')}</Badge>
                       )}
                       {task.status === 'running' && (
                         <div className="flex items-center gap-2">
-                          <Badge variant="secondary">进行中</Badge>
+  <Badge variant="secondary">{t('task.filters.status.running')}</Badge>
                           {typeof task.progress === 'number' && (
                             <div className="flex items-center gap-2 w-32">
                               <Progress value={task.progress} className="h-2" />
@@ -2006,7 +2054,7 @@ export function DataManagement({
                         </div>
                       )}
                       {task.status === 'pending' && (
-                        <Badge variant="outline">待执行</Badge>
+  <Badge variant="outline">{t('task.filters.status.pending')}</Badge>
                       )}
                     </TableCell>
                     <TableCell>
@@ -2022,28 +2070,28 @@ export function DataManagement({
                       <div className="flex justify-end gap-2">
                         {task.status === 'running' && (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>查看详情</Button>
-                            <Button variant="destructive" size="sm" onClick={() => handleStopTask(task.id)}>停止</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>{t('task.actions.viewDetail')}</Button>
+                            <Button variant="destructive" size="sm" onClick={() => handleStopTask(task.id)}>{t('task.actions.stop')}</Button>
                           </>
                         )}
                         {task.status === 'pending' && (
                           <>
-                            <Button size="sm" onClick={() => handleStartTask(task.id)}>开始执行</Button>
-                            <Button variant="outline" size="sm" onClick={() => handleEditTask(task.id)}>编辑</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handleDeleteTask(task.id)}>删除</Button>
+                            <Button size="sm" onClick={() => handleStartTask(task.id)}>{t('task.actions.start')}</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleEditTask(task.id)}>{t('task.actions.edit')}</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteTask(task.id)}>{t('task.actions.delete')}</Button>
                           </>
                         )}
                         {task.status === 'failed' && (
                           <>
-                            <Button size="sm" onClick={() => handleRetryTask(task.id)}>重试</Button>
-                            <Button variant="outline" size="sm" onClick={() => handleCopyRules(task.id)}>复制规则</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handleDeleteTask(task.id)}>删除</Button>
+                            <Button size="sm" onClick={() => handleRetryTask(task.id)}>{t('task.actions.retry')}</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleCopyRules(task.id)}>{t('task.actions.copyRules')}</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteTask(task.id)}>{t('task.actions.delete')}</Button>
                           </>
                         )}
                         {task.status === 'success' && (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>查看详情</Button>
-                            <Button variant="outline" size="sm" onClick={() => handleCopyRules(task.id)}>复制规则</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleViewTask(task.id)}>{t('task.actions.viewDetail')}</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleCopyRules(task.id)}>{t('task.actions.copyRules')}</Button>
                           </>
                         )}
                       </div>

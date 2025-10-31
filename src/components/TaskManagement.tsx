@@ -88,6 +88,7 @@ import TaskCompare from './TaskCompare';
 import type { TaskCompareItem } from './TaskCompare';
 import { getAvailableActions, getCommonActionKeys } from '../utils/taskActions';
 import { TASK_TYPES, ALLOWED_TASK_TYPES, TaskType } from '../utils/taskTypes';
+import { useLanguage } from "../i18n/LanguageContext";
 
 // 模拟项目列表（后续可替换为真实项目数据）
 const mockProjects = [
@@ -308,6 +309,7 @@ interface FormData {
   resourceConfig: {
     cores: number;
     memory: number; // GB
+    acceleratorCards?: number; // 加速卡数量（GPU/NPU 时启用）
     maxRunTime: number; // 最大运行时长（分钟）
   };
 }
@@ -318,6 +320,7 @@ interface FormData {
     onOpenTaskDetailFullPage,
     autoOpenDetailAfterCreate = false,
   }) => {
+    const { t } = useLanguage();
     // 创建任务弹窗分步导航（4步）
     const [currentStep, setCurrentStep] = useState<number>(1);
     const steps = [
@@ -479,7 +482,8 @@ interface FormData {
     resourceType: 'cpu',
     resourceConfig: {
       cores: 4,
-      memory: 8,
+      memory: 32,
+      acceleratorCards: 1,
       maxRunTime: 120
     }
   });
@@ -656,6 +660,46 @@ interface FormData {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDatasetPreview, setShowDatasetPreview] = useState(false);
+
+  // 资源配置历史（本地存储加载）
+  interface ResourceConfigHistoryEntry {
+    resourceType: 'cpu' | 'gpu' | 'npu';
+    resourceConfig: { cores: number; memory: number; maxRunTime: number; acceleratorCards?: number };
+    ts: number;
+  }
+  const [resourceConfigHistory, setResourceConfigHistory] = useState<ResourceConfigHistoryEntry[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('resource_config_history');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setResourceConfigHistory(parsed as ResourceConfigHistoryEntry[]);
+      }
+    } catch (e) {
+      console.warn('加载资源配置历史失败:', e);
+    }
+  }, []);
+
+  // 资源类型联动：CPU 默认内存至少 32GB；GPU/NPU 默认加速卡为 1
+  useEffect(() => {
+    setFormData(prev => {
+      const next = { ...prev };
+      if (prev.resourceType === 'cpu') {
+        const mem = prev.resourceConfig.memory;
+        const needUpdate = (mem ?? 0) < 32 || typeof prev.resourceConfig.acceleratorCards !== 'undefined';
+        if (needUpdate) {
+          next.resourceConfig = { ...prev.resourceConfig, memory: mem >= 32 ? mem : 32, acceleratorCards: undefined };
+          return next;
+        }
+      } else {
+        if (typeof prev.resourceConfig.acceleratorCards === 'undefined') {
+          next.resourceConfig = { ...prev.resourceConfig, acceleratorCards: 1 };
+          return next;
+        }
+      }
+      return prev;
+    });
+  }, [formData.resourceType]);
 
   // 第4步：主/协变量文件多选弹窗状态与搜索词
   const [mainFilesOpen, setMainFilesOpen] = useState(false);
@@ -1293,14 +1337,23 @@ interface FormData {
     }
 
     // 资源配置验证
-    if (formData.resourceConfig.cores < 1 || formData.resourceConfig.cores > 32) {
-      errors.resourceCores = 'CPU核心数应在1-32之间';
-    }
-    if (formData.resourceConfig.memory < 1 || formData.resourceConfig.memory > 128) {
-      errors.resourceMemory = '内存大小应在1-128GB之间';
+    if (formData.resourceType === 'cpu') {
+      if (formData.resourceConfig.cores < 1 || formData.resourceConfig.cores > 32) {
+        errors.resourceCores = 'CPU核心数应在1-32之间';
+      }
+      if (formData.resourceConfig.memory < 1 || formData.resourceConfig.memory > 128) {
+        errors.resourceMemory = '内存大小应在1-128GB之间';
+      }
     }
     if (formData.resourceConfig.maxRunTime < 5 || formData.resourceConfig.maxRunTime > 2880) {
       errors.resourceMaxRunTime = '最大运行时长应在5-2880分钟之间';
+    }
+    // GPU/NPU 时加速卡数量校验
+    if ((formData.resourceType === 'gpu' || formData.resourceType === 'npu')) {
+      const acc = formData.resourceConfig.acceleratorCards ?? 0;
+      if (acc < 1 || acc > 8) {
+        errors.resourceAcceleratorCards = '加速卡数量应在1-8之间';
+      }
     }
 
     // 描述验证（可选）
@@ -1868,7 +1921,7 @@ interface FormData {
             return current;
           })(),
           resourceType: 'cpu',
-          resourceConfig: { cores: 4, memory: 8, maxRunTime: 120 },
+          resourceConfig: { cores: 4, memory: 32, maxRunTime: 120, acceleratorCards: 1 },
         };
       });
       setIsEditMode(true);
@@ -2379,8 +2432,9 @@ interface FormData {
                 resourceType: 'cpu',
                 resourceConfig: {
                   cores: 4,
-                  memory: 8,
-                  maxRunTime: 120
+                  memory: 32,
+                  maxRunTime: 120,
+                  acceleratorCards: 1
                 }
               });
               setFormErrors({});
@@ -2579,34 +2633,66 @@ interface FormData {
                         <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
                           <h4 className="font-medium">资源配额设置</h4>
                           <div className="grid grid-cols-3 gap-4">
-                            <div>
-                              <Label htmlFor="cores">CPU核心数</Label>
-                              <Input
-                                id="cores"
-                                type="number"
-                                value={formData.resourceConfig.cores}
-                                onChange={(e) => handleInputChange('resourceConfig', {
-                                  ...formData.resourceConfig,
-                                  cores: parseInt(e.target.value) || 4
-                                })}
-                                min="1"
-                                max="32"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="memory">内存 (GB)</Label>
-                              <Input
-                                id="memory"
-                                type="number"
-                                value={formData.resourceConfig.memory}
-                                onChange={(e) => handleInputChange('resourceConfig', {
-                                  ...formData.resourceConfig,
-                                  memory: parseInt(e.target.value) || 8
-                                })}
-                                min="1"
-                                max="128"
-                              />
-                            </div>
+                            {formData.resourceType === 'cpu' && (
+                              <>
+                                <div>
+                                  <Label htmlFor="cores">CPU核心数</Label>
+                                  <Input
+                                    id="cores"
+                                    type="number"
+                                    value={formData.resourceConfig.cores}
+                                    onChange={(e) => handleInputChange('resourceConfig', {
+                                      ...formData.resourceConfig,
+                                      cores: parseInt(e.target.value) || 4
+                                    })}
+                                    min="1"
+                                    max="32"
+                                    className={formErrors.resourceCores ? 'border-red-500' : ''}
+                                  />
+                                  {formErrors.resourceCores && (
+                                    <p className="text-xs text-red-500 mt-1">{formErrors.resourceCores}</p>
+                                  )}
+                                </div>
+                                <div>
+                                  <Label htmlFor="memory">内存 (GB)</Label>
+                                  <Input
+                                    id="memory"
+                                    type="number"
+                                    value={formData.resourceConfig.memory}
+                                    onChange={(e) => handleInputChange('resourceConfig', {
+                                      ...formData.resourceConfig,
+                                      memory: parseInt(e.target.value) || 32
+                                    })}
+                                    min="1"
+                                    max="128"
+                                    className={formErrors.resourceMemory ? 'border-red-500' : ''}
+                                  />
+                                  {formErrors.resourceMemory && (
+                                    <p className="text-xs text-red-500 mt-1">{formErrors.resourceMemory}</p>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                            {formData.resourceType !== 'cpu' && (
+                              <div>
+                                <Label htmlFor="acceleratorCards">加速卡数量</Label>
+                                <Input
+                                  id="acceleratorCards"
+                                  type="number"
+                                  value={formData.resourceConfig.acceleratorCards ?? 1}
+                                  onChange={(e) => handleInputChange('resourceConfig', {
+                                    ...formData.resourceConfig,
+                                    acceleratorCards: parseInt(e.target.value) || 1
+                                  })}
+                                  min="1"
+                                  max="8"
+                                  className={formErrors.resourceAcceleratorCards ? 'border-red-500' : ''}
+                                />
+                                {formErrors.resourceAcceleratorCards && (
+                                  <p className="text-xs text-red-500 mt-1">{formErrors.resourceAcceleratorCards}</p>
+                               )}
+                              </div>
+                            )}
                             <div>
                               <Label htmlFor="maxRunTime">最大运行时长 (分钟)</Label>
                               <Input
@@ -2619,7 +2705,11 @@ interface FormData {
                                 })}
                                 min="1"
                                 max="2880"
+                                className={formErrors.resourceMaxRunTime ? 'border-red-500' : ''}
                               />
+                              {formErrors.resourceMaxRunTime && (
+                                <p className="text-xs text-red-500 mt-1">{formErrors.resourceMaxRunTime}</p>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -4455,7 +4545,7 @@ interface FormData {
                           size="sm"
                           onClick={() => handleFilterChange('dateRange', { start: '', end: '' })}
                         >
-                          清除
+                          {t('common.clear')}
                         </Button>
                       </div>
 

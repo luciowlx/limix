@@ -22,20 +22,35 @@ import {
   ChevronRight,
   Lightbulb
 } from "lucide-react";
+import { useLanguage } from "../i18n/LanguageContext";
 
 interface DashboardProps {
   onNavigateToProjectManagement?: () => void;
   onNavigateToDataManagement?: () => void;
   onNavigateToTaskManagement?: () => void;
   onNavigateToModelManagement?: () => void;
+  // 新增：打开统一活动中心（通知中心的“活动”Tab）
+  onOpenActivityCenter?: () => void;
+  // 新增：跳转到项目管理总览（不弹创建项目弹窗）
+  onNavigateToProjectOverview?: () => void;
 }
 
 export function Dashboard({ 
   onNavigateToProjectManagement,
   onNavigateToDataManagement,
   onNavigateToTaskManagement,
-  onNavigateToModelManagement
+  onNavigateToModelManagement,
+  onOpenActivityCenter,
+  onNavigateToProjectOverview
 }: DashboardProps = {}) {
+  const { t } = useLanguage();
+
+  const displayStatus = (status: string) => {
+    if (status === "已完成") return t("status.completed");
+    if (status === "进行中") return t("status.inProgress");
+    if (status === "失败") return t("status.failed");
+    return status;
+  };
   // 顶部统计卡片已按原型要求移除
 
   const quickActions = [
@@ -69,32 +84,63 @@ export function Dashboard({
     }
   ];
 
+  // 最近项目：增加截止时间（deadline）和开始时间（startDate），用于计算项目剩余时间
   const recentProjects = [
     {
       name: "缺陷检测",
       description: "基于深度学习的产品缺陷检测系统",
-      progress: 75,
       status: "进行中",
       members: ["L", "M", "K"],
-      color: "blue"
+      color: "blue",
+      startDate: "2025-10-01T09:00:00Z",
+      deadline: "2025-11-15T18:00:00Z",
     },
     {
       name: "电力预测",
       description: "个性化产品推荐系统优化",
-      progress: 45,
       status: "进行中", 
       members: ["A", "B"],
-      color: "green"
+      color: "green",
+      startDate: "2025-10-10T09:00:00Z",
+      deadline: "2025-11-05T18:00:00Z",
     },
     {
       name: "价格预测模型",
       description: "基于时间序列的价格预测分析",
-      progress: 100,
       status: "已完成",
       members: ["C", "D", "E", "F", "G"],
-      color: "purple"
+      color: "purple",
+      startDate: "2025-08-01T09:00:00Z",
+      deadline: "2025-10-01T18:00:00Z",
     }
   ];
+
+  // 计算剩余时间文案（如：2天3小时；已到期；已完成）
+  const formatRemainingTime = (deadline: string, status: string) => {
+    if (status === "已完成") return "已完成";
+    const now = new Date();
+    const end = new Date(deadline);
+    const diffMs = end.getTime() - now.getTime();
+    if (diffMs <= 0) return "已到期";
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    if (diffDays > 0) {
+      return `${diffDays}天${diffHours}小时`;
+    }
+    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    return `${diffHours}小时${diffMinutes}分钟`;
+  };
+
+  // 计算时间使用进度百分比（用于进度条），区间 [0, 100]
+  const calcTimeUsedPercent = (startDate: string, deadline: string, status: string) => {
+    if (status === "已完成") return 100;
+    const start = new Date(startDate);
+    const end = new Date(deadline);
+    const now = new Date();
+    const totalMs = Math.max(end.getTime() - start.getTime(), 1);
+    const usedMs = Math.min(Math.max(now.getTime() - start.getTime(), 0), totalMs);
+    return Math.round((usedMs / totalMs) * 100);
+  };
 
   const systemStatus = [
     { label: "CPU 使用率", value: 45, color: "bg-blue-500" },
@@ -213,7 +259,8 @@ export function Dashboard({
   const resourceCards = [
     { label: "GPU使用率", value: 78, icon: Gauge, color: "text-red-600" },
     { label: "存储使用", value: 68, icon: HardDrive, color: "text-gray-700" },
-    { label: "任务队列", value: 12, icon: Activity, color: "text-blue-600" },
+    // 将“任务队列”改为“CPU统计”，展示为百分比并使用进度条
+    { label: "CPU统计", value: 45, icon: Cpu, color: "text-green-600" },
   ];
 
   // 智能助手建议列表（去除说明性句子，避免与标题重复）
@@ -231,7 +278,7 @@ export function Dashboard({
           <div className="flex items-center justify-start">
             <div className="flex items-center gap-2">
               <span className="text-lg font-semibold">LimiX机器学习平台 — 智能数据分析工作台</span>
-              <Badge variant="secondary" className="bg-gray-100 text-gray-700">欢迎回来</Badge>
+              <Badge variant="secondary" className="bg-gray-100 text-gray-700">{t("common.welcomeBack")}</Badge>
             </div>
           </div>
         </CardContent>
@@ -239,7 +286,7 @@ export function Dashboard({
       {/* 全局统计看板（高保真） — 置于页面上方 */}
       <Card className="bg-white">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" />全局统计看板</CardTitle>
+          <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" />{t("dashboard.globalStats")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -304,8 +351,8 @@ export function Dashboard({
         {/* 最近活动（置于左列，大卡） */}
           <Card className="bg-white">
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>最近活动</CardTitle>
-              <Button variant="outline" size="sm">查看全部</Button>
+              <CardTitle>{t("dashboard.recentActivity")}</CardTitle>
+              <Button variant="outline" size="sm" onClick={() => onOpenActivityCenter && onOpenActivityCenter()}>{t("common.viewAll")}</Button>
             </CardHeader>
             <CardContent className="space-y-3">
               {recentActivities.map((activity, index) => {
@@ -319,7 +366,7 @@ export function Dashboard({
                         <p className="text-sm text-gray-900">{activity.description}</p>
                         <div className="mt-1 text-xs">
                           <button className="text-blue-600 hover:underline">{activity.related}</button>
-                          <Badge variant="secondary" className={`ml-2 ${activityStatusClass[activity.status]}`}>{activity.status}</Badge>
+                          <Badge variant="secondary" className={`ml-2 ${activityStatusClass[activity.status]}`}>{displayStatus(activity.status)}</Badge>
                         </div>
                         {activity.status === '失败' && activity.statusMsg && (
                           <p className="text-xs text-red-600 mt-1">{activity.statusMsg}</p>
@@ -328,7 +375,7 @@ export function Dashboard({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500" title={activity.timeAbs}>{activity.timeRel}</span>
-                      <Button variant="outline" size="sm" className="text-blue-600 border-blue-200 hover:bg-blue-50">查看详情</Button>
+                      <Button variant="outline" size="sm" className="text-blue-600 border-blue-200 hover:bg-blue-50">{t("common.viewDetail")}</Button>
                     </div>
                   </div>
                 );
@@ -338,7 +385,7 @@ export function Dashboard({
           {/* 系统资源状态看板（移动到左侧红框区域，横向样式） */}
           <Card className="bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Cpu className="h-5 w-5" />系统资源状态看板</CardTitle>
+              <CardTitle className="flex items-center gap-2"><Cpu className="h-5 w-5" />{t("dashboard.systemResource")}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -350,15 +397,9 @@ export function Dashboard({
                       <div className="flex-1">
                         <div className="flex items-center justify-between text-sm mb-1">
                           <span className="text-gray-700">{rc.label}</span>
-                          {rc.label === '任务队列' ? (
-                            <span className="font-medium">{rc.value}</span>
-                          ) : (
-                            <span className="font-medium">{rc.value}%</span>
-                          )}
+                          <span className="font-medium">{rc.value}%</span>
                         </div>
-                        {rc.label === '任务队列' ? null : (
-                          <Progress value={rc.value} className="h-2" />
-                        )}
+                        <Progress value={rc.value} className="h-2" />
                       </div>
                     </div>
                   );
@@ -373,8 +414,8 @@ export function Dashboard({
           {/* 最近项目（移至右列，小卡） */}
           <Card className="bg-white">
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>最近项目</CardTitle>
-              <Button variant="outline" size="sm">查看全部</Button>
+              <CardTitle>{t("dashboard.recentProjects")}</CardTitle>
+              <Button variant="outline" size="sm" onClick={() => onNavigateToProjectOverview && onNavigateToProjectOverview()}>{t("common.viewAll")}</Button>
             </CardHeader>
             <CardContent className="space-y-4">
               {recentProjects.map((project, index) => (
@@ -388,16 +429,16 @@ export function Dashboard({
                       variant={project.status === "已完成" ? "default" : "secondary"}
                       className="ml-2"
                     >
-                      {project.status}
+                      {displayStatus(project.status)}
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex-1 mr-4">
                       <div className="flex items-center justify-between text-xs mb-1">
-                        <span>进度</span>
-                        <span>{project.progress}%</span>
+                        <span>{t("dashboard.remainingTime")}</span>
+                        <span>{formatRemainingTime(project.deadline, project.status)}</span>
                       </div>
-                      <Progress value={project.progress} className="h-2" />
+                      <Progress value={calcTimeUsedPercent(project.startDate, project.deadline, project.status)} className="h-2" />
                     </div>
                     <div className="flex items-center space-x-1">
                       {project.members.slice(0, 3).map((member, memberIndex) => (

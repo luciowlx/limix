@@ -9,9 +9,11 @@ import ErrorBoundary from "./ErrorBoundary";
 interface FullPageViewProps {
   type: 'personal-center' | 'personalization-settings' | 'notification-center' | 'ai-assistant' | null;
   onClose: () => void;
+  // 新增：通知中心初始页签（notifications | activity），用于从看板“查看全部”打开活动中心
+  notificationCenterInitialTab?: 'notifications' | 'activity';
 }
 
-export function FullPageView({ type, onClose }: FullPageViewProps) {
+export function FullPageView({ type, onClose, notificationCenterInitialTab = 'notifications' }: FullPageViewProps) {
   if (!type) return null;
 
   const getPageTitle = () => {
@@ -36,7 +38,7 @@ export function FullPageView({ type, onClose }: FullPageViewProps) {
       case 'personalization-settings':
         return <PersonalizationSettings onBack={onClose} />;
       case 'notification-center':
-        return <NotificationCenterContent />;
+        return <NotificationCenterContent initialTab={notificationCenterInitialTab} />;
       case 'ai-assistant':
         // 采用统一的 AI Copilot 组件（前端原型，模拟数据），在全屏容器内部渲染
         // 使用错误边界包裹，确保异常时不会影响整个应用

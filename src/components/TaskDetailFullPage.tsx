@@ -2455,10 +2455,10 @@ output:
                         <Input className="pl-8 w-40" value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} placeholder="搜索行内容" />
                       </div>
 
-                      <Button variant="outline" size="sm" onClick={() => setMissingOnly((prev) => !prev)} className={missingOnly ? "bg-orange-50 border-orange-500 text-orange-600" : ""}>
+                      <Button variant="outline" size="sm" onClick={() => setMissingOnly((prev) => !prev)} className={missingOnly ? "bg-red-50 border-red-500 text-red-600" : ""}>
                         <Filter className="h-4 w-4 mr-1" />缺失值
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => setUniqueOnly((prev) => !prev)} className={uniqueOnly ? "bg-indigo-50 border-indigo-500 text-indigo-600" : ""}>
+                      <Button variant="outline" size="sm" onClick={() => setUniqueOnly((prev) => !prev)} className={uniqueOnly ? "bg-orange-50 border-orange-500 text-orange-600" : ""}>
                         <TrendingUp className="h-4 w-4 mr-1" />唯一值
                       </Button>
                       <Select value={uniqueField || ''} onValueChange={(v: string) => { setUniqueField(v || null); setCurrentPage(1); }}>

@@ -1,9 +1,10 @@
-import { Bell, User, Settings, LogOut, Palette, Info } from "lucide-react";
+import { Bell, User, Settings, LogOut, Palette, Info, Languages } from "lucide-react";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { useState, useEffect } from "react";
+import { useLanguage } from "../i18n/LanguageContext";
 
 interface HeaderProps {
   activeTab: string;
@@ -18,13 +19,15 @@ export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPer
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  const { lang, t, setLang, toggleLang } = useLanguage();
+
   const navItems = [
-    { name: "看板" },
-    { name: "项目管理" },
-    { name: "数据管理" },
-    { name: "任务管理" },
-    { name: "模型管理" },
-    { name: "系统管理" },
+    { id: "dashboard", zh: "看板", label: t("nav.dashboard") },
+    { id: "project", zh: "项目管理", label: t("nav.project") },
+    { id: "data", zh: "数据管理", label: t("nav.data") },
+    { id: "task", zh: "任务管理", label: t("nav.task") },
+    { id: "model", zh: "模型管理", label: t("nav.model") },
+    { id: "system", zh: "系统管理", label: t("nav.system") },
   ];
 
   // 模拟获取未读通知数量
@@ -44,31 +47,49 @@ export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPer
           </div>
           <div className="flex flex-col">
             <span className="text-xl font-medium">Limix</span>
-            <span className="text-xs text-slate-400">大模型机器学习平台</span>
+            <span className="text-xs text-slate-400">{t("app.subtitle")}</span>
           </div>
         </div>
         
         <nav className="flex items-center space-x-6">
           {navItems.map((item, index) => (
             <button
-              key={item.name}
+              key={item.id}
               onClick={() => {
-                console.log("点击导航项:", item.name); // 添加调试日志
-                onTabChange(item.name);
+                console.log("点击导航项:", item.label); // 添加调试日志
+                // 内部仍然使用中文标签作为 activeTab 值，以兼容现有 App.tsx 逻辑
+                onTabChange(item.zh);
               }}
               className={`px-3 py-2 rounded-md transition-colors ${
-                activeTab === item.name
+                activeTab === item.zh
                   ? "bg-slate-700 text-white" 
                   : "text-slate-300 hover:text-white hover:bg-slate-700"
               }`}
             >
-              {item.name}
+              {item.label}
             </button>
           ))}
         </nav>
       </div>
 
       <div className="flex items-center space-x-4">
+        {/* 语言切换 */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-slate-300 hover:text-white flex items-center gap-1"
+            >
+              <Languages className="h-4 w-4" />
+              <span>{lang === "zh" ? "中文" : "EN"}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-28 bg-white border border-gray-200 shadow-lg z-50">
+            <DropdownMenuItem onClick={() => setLang("zh")}>中文</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setLang("en")}>English</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button 
           variant="ghost" 
           size="icon" 
@@ -109,7 +130,7 @@ export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPer
               className="flex items-center space-x-2 cursor-pointer"
             >
               <User className="h-4 w-4" />
-              <span>个人中心</span>
+              <span>{t("header.personalCenter")}</span>
             </DropdownMenuItem>
             <DropdownMenuItem 
               onClick={() => {
@@ -119,7 +140,7 @@ export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPer
               className="flex items-center space-x-2 cursor-pointer"
             >
               <Palette className="h-4 w-4" />
-              <span>个性化设置</span>
+              <span>{t("header.personalization")}</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem 
@@ -137,7 +158,7 @@ export function Header({ activeTab, onTabChange, onOpenPersonalCenter, onOpenPer
               className="flex items-center space-x-2 cursor-pointer text-red-600 hover:text-red-700"
             >
               <LogOut className="h-4 w-4" />
-              <span>退出登录</span>
+              <span>{t("header.logout")}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

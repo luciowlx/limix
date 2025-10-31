@@ -22,6 +22,7 @@ import {
   Clock,
   Eye
 } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface ProjectDetailCardsProps {
   project: any;
@@ -42,6 +43,7 @@ export function ProjectDetailCards({
   onQuickPredict,
   onViewReports
 }: ProjectDetailCardsProps) {
+  const { t } = useLanguage();
   // 语音指令 & 会话记录（仅在自动模式下使用）
   const [voiceInput, setVoiceInput] = React.useState('');
   const [isRecording, setIsRecording] = React.useState(false);
@@ -99,40 +101,40 @@ export function ProjectDetailCards({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-blue-600" />
-              基本信息
+              {t('project.cards.basicInfo')}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600 w-16">名称:</span>
+                  <span className="text-sm text-gray-600 w-16">{t('data.columns.name')}:</span>
                   <span className="text-sm font-medium">{project?.title}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600 w-16">描述:</span>
+                  <span className="text-sm text-gray-600 w-16">{t('data.columns.description')}:</span>
                   <span className="text-sm">{project?.description}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-600">周期:</span>
+                  <span className="text-sm text-gray-600">{t('project.cards.cycle')}:</span>
                   <span className="text-sm">{project?.projectCycle}</span>
                 </div>
               </div>
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-600">负责人:</span>
+                  <span className="text-sm text-gray-600">{t('project.cards.owner')}:</span>
                   <span className="text-sm">{project?.owner}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-600">成员:</span>
-                  <span className="text-sm">{project?.members} 人</span>
+                  <span className="text-sm text-gray-600">{t('project.cards.members')}:</span>
+                  <span className="text-sm">{project?.members}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <TrendingUp className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-600">状态:</span>
+                  <span className="text-sm text-gray-600">{t('project.cards.status')}:</span>
                   <Badge variant={project?.status === "进行中" ? "default" : "secondary"}>
                     {project?.status}
                   </Badge>
@@ -149,16 +151,16 @@ export function ProjectDetailCards({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Database className="h-5 w-5 text-green-600" />
-              数据管理
+              {t('project.cards.data.title')}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-center p-4 bg-green-50 rounded-lg">
               <div className="text-2xl font-semibold text-green-600">{project?.stats?.datasets || 0}</div>
-              <div className="text-sm text-gray-500">数据集</div>
+              <div className="text-sm text-gray-500">{t('project.cards.datasets')}</div>
             </div>
             <div className="space-y-2">
-              <div className="text-sm text-gray-600">主要数据源:</div>
+              <div className="text-sm text-gray-600">{t('project.cards.mainDatasource')}:</div>
               <div className="text-sm font-medium">{project?.dataSource}</div>
             </div>
             <div className="space-y-2">
@@ -167,7 +169,7 @@ export function ProjectDetailCards({
                 className="w-full bg-black hover:bg-gray-800 text-white"
               >
                 <Upload className="h-4 w-4 mr-2" />
-                导入数据管理
+                {t('project.cards.importData')}
               </Button>
               <Button 
                 onClick={onNavigateToData}
@@ -175,7 +177,7 @@ export function ProjectDetailCards({
                 className="w-full border-green-600 text-green-600 hover:bg-green-50"
               >
                 <Database className="h-4 w-4 mr-2" />
-                进入数据管理
+                {t('project.cards.enterData')}
               </Button>
             </div>
           </CardContent>
@@ -186,22 +188,22 @@ export function ProjectDetailCards({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-blue-600" />
-              任务管理
+              {t('project.cards.task.title')}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-2">
               <div className="text-center p-3 bg-blue-50 rounded-lg">
                 <div className="text-lg font-semibold text-blue-600">{project?.totalTasks || 0}</div>
-                <div className="text-xs text-gray-500">总任务</div>
+                <div className="text-xs text-gray-500">{t('project.cards.totalTasks')}</div>
               </div>
               <div className="text-center p-3 bg-green-50 rounded-lg">
                 <div className="text-lg font-semibold text-green-600">{project?.completedTasks || 0}</div>
-                <div className="text-xs text-gray-500">已完成</div>
+                <div className="text-xs text-gray-500">{t('project.cards.completed')}</div>
               </div>
             </div>
             <div className="space-y-2">
-              <div className="text-sm text-gray-600">当前任务:</div>
+              <div className="text-sm text-gray-600">{t('project.cards.currentTask')}</div>
               <div className="text-sm font-medium">{project?.task}</div>
             </div>
             <Button 
@@ -209,7 +211,7 @@ export function ProjectDetailCards({
               className="w-full bg-blue-600 hover:bg-blue-700"
             >
               <CheckCircle className="h-4 w-4 mr-2" />
-              进入任务管理
+              {t('project.cards.enterTasks')}
             </Button>
           </CardContent>
         </Card>
@@ -219,16 +221,16 @@ export function ProjectDetailCards({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Brain className="h-5 w-5 text-purple-600" />
-              模型管理
+              {t('project.cards.model.title')}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-center p-4 bg-purple-50 rounded-lg">
               <div className="text-2xl font-semibold text-purple-600">{project?.stats?.models || 7}</div>
-              <div className="text-sm text-gray-500">模型数量</div>
+              <div className="text-sm text-gray-500">{t('project.cards.modelsCount')}</div>
             </div>
             <div className="space-y-2">
-              <div className="text-sm text-gray-600">主要模型:</div>
+              <div className="text-sm text-gray-600">{t('project.cards.mainModel')}</div>
               <div className="text-sm font-medium">{project?.model || 'CNN神经模型'}</div>
             </div>
             <Button 
@@ -236,7 +238,7 @@ export function ProjectDetailCards({
               className="w-full bg-black hover:bg-gray-800 text-white"
             >
               <Brain className="h-4 w-4 mr-2" />
-              进入模型管理
+              {t('project.cards.enterModels')}
             </Button>
           </CardContent>
         </Card>
@@ -252,9 +254,9 @@ export function ProjectDetailCards({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-blue-600" />
-            基本信息
+            {t('project.cards.basicInfo')}
             <Badge variant="secondary" className="ml-2 bg-green-100 text-green-600">
-              自动清洗
+              {t('project.cards.autoClean')}
             </Badge>
           </CardTitle>
         </CardHeader>

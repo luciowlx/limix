@@ -22,7 +22,6 @@ import {
   Eye,
   FileText,
   Layers,
-  Activity,
   Copy,
   Pencil
 } from "lucide-react";
@@ -76,6 +75,8 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
   const [missingOnly, setMissingOnly] = useState(false);
   const [uniqueOnly, setUniqueOnly] = useState(false);
   const [uniqueField, setUniqueField] = useState<keyof DataRow>("Cabin");
+  // 新增：用于“点击标签快速定位”——选择具体缺失字段
+  const [missingField, setMissingField] = useState<keyof DataRow | null>(null);
   // 新增：基本信息与权限控制
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [editableDesc, setEditableDesc] = useState<string>(meta.description);
@@ -84,6 +85,8 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
   const canDownload = meta.permissions.canDownload;
   // 新增：缺失分析交互状态
   const [heatmapMode, setHeatmapMode] = useState<'sample' | 'column'>("sample");
+  // 预览区视图模式：数据表 or 缺失分析可视化矩阵
+  const [previewVisualMode, setPreviewVisualMode] = useState<'table' | 'missing'>("table");
   // 移除交互分析相关的状态，界面保持简洁
   // const [searchTerm, setSearchTerm] = useState("");
   // const [xVariable, setXVariable] = useState("");
@@ -110,6 +113,30 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
   
   // 只包含数值型变量
   const numericVariables = ["PassengerId", "Survived", "Pclass", "Age", "SibSp", "Parch", "Fare"];
+  
+  // 缺失率与唯一值比例（按列）计算：用于表头上方展示
+  const calcColumnStats = () => {
+    const totalRows = mockData.length;
+    const stats: Record<string, { missingRate: number; uniqueRate: number; missingCount: number; uniqueCount: number }> = {};
+    allVariables.forEach((field) => {
+      let missingCount = 0;
+      const values: string[] = [];
+      mockData.forEach((row) => {
+        const raw = row[field as keyof DataRow];
+        const isMissing = raw === null || raw === undefined || (typeof raw === 'number' && Number.isNaN(raw)) || (typeof raw === 'string' && raw.trim() === '');
+        if (isMissing) {
+          missingCount += 1;
+        } else {
+          values.push(typeof raw === 'string' ? raw.trim() : String(raw));
+        }
+      });
+      const uniqueCount = new Set(values).size;
+      const missingRate = totalRows === 0 ? 0 : (missingCount / totalRows) * 100;
+      const uniqueRate = totalRows === 0 ? 0 : (uniqueCount / totalRows) * 100; // 按需求：唯一值数量/总行数
+      stats[field] = { missingRate, uniqueRate, missingCount, uniqueCount };
+    });
+    return stats;
+  };
   
   // 计算“唯一值占比（字段平均）”：对每个字段计算非空值的唯一比例并取平均
   const getUniqueValueRatioPercent = () => {
@@ -240,7 +267,13 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
   const getFilteredData = () => {
     let data = [...mockData];
     if (missingOnly) {
-      data = data.filter((row) => rowHasMissing(row));
+      // 若指定了具体字段，则只过滤该字段缺失的行；否则过滤任意字段缺失的行
+      data = data.filter((row) => {
+        if (missingField) {
+          return isMissingValue(row[missingField]);
+        }
+        return rowHasMissing(row);
+      });
     }
     if (uniqueOnly && uniqueField) {
       const counts = new Map<string, number>();
@@ -502,13 +535,10 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
                 <div className="text-base font-semibold">统计信息</div>
               </div>
               {(() => {
-                const m = getMissingAnalysisMock();
                 const totalRows = meta.stats.totalRows;
                 const tiles = [
                   { label: "总记录数", value: totalRows, icon: Database, cls: "bg-blue-50 text-blue-700 border-blue-200" },
                   { label: "字段数量", value: allVariables.length, icon: Layers, cls: "bg-green-50 text-green-700 border-green-200" },
-                  { label: "缺失值比例", value: `${m.missingRatio.toFixed(1)}%`, icon: AlertTriangle, cls: "bg-orange-50 text-orange-700 border-orange-200" },
-                  { label: "唯一值占比（字段平均）", value: `${getUniqueValueRatioPercent().toFixed(1)}%`, icon: BarChart3, cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
                 ];
                 return (
                   <div className="grid grid-cols-2 gap-4">
@@ -529,319 +559,335 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
         </CardContent>
       </Card>
 
-      {/* 数据表预览 */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-2">
-              <FileText className="h-5 w-5" />
-              <span>数据表预览</span>
-            </CardTitle>
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600">选择要查看的记录数:</span>
-              <Select value={selectedRows.toString()} onValueChange={(value: string) => setSelectedRows(Number(value))}>
-                <SelectTrigger className="w-20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="5">5</SelectItem>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                </SelectContent>
-              </Select>
-              <span className="text-sm text-gray-600">条/页</span>
-              {/* 按钮改为两个：缺失值 与 唯一值（可叠加），并添加字段选择器 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setMissingOnly((prev) => !prev)}
-                className={missingOnly ? "bg-orange-50 border-orange-500 text-orange-600" : ""}
-              >
-                <Filter className="h-4 w-4 mr-2" />
-                缺失值
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setUniqueOnly((prev) => !prev)}
-                className={uniqueOnly ? "bg-indigo-50 border-indigo-500 text-indigo-600" : ""}
-              >
-                <TrendingUp className="h-4 w-4 mr-2" />
-                唯一值
-              </Button>
-              <Select value={uniqueField as string} onValueChange={(value: string) => setUniqueField(value as keyof DataRow)}>
-                <SelectTrigger className="w-32">
-                  <SelectValue placeholder="选择字段" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allVariables.map((v) => (
-                    <SelectItem key={v} value={v}>{v}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* 数据表预览/缺失分析可视化 切换卡片 */}
+      {previewVisualMode === 'table' ? (
+        <Card className="fade-in">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center space-x-2">
+                <FileText className="h-5 w-5" />
+                <span>数据表预览</span>
+              </CardTitle>
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-600">选择要查看的记录数:</span>
+                <Select value={selectedRows.toString()} onValueChange={(value: string) => setSelectedRows(Number(value))}>
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5</SelectItem>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-sm text-gray-600">条/页</span>
+                {/* 按钮改为两个：缺失值 与 唯一值（可叠加），并添加字段选择器 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMissingOnly((prev) => !prev)}
+                  className={missingOnly ? "bg-red-50 border-red-500 text-red-600" : ""}
+                >
+                  <Filter className="h-4 w-4 mr-2" />
+                  缺失值
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setUniqueOnly((prev) => !prev)}
+                  className={uniqueOnly ? "bg-orange-50 border-orange-500 text-orange-600" : ""}
+                >
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  唯一值
+                </Button>
+                {/* 新增：字段选择（用于唯一值过滤）；缺失值过滤也支持按字段 */}
+                <Select value={uniqueField as string} onValueChange={(value: string) => setUniqueField(value as keyof DataRow)}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue placeholder="选择字段" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allVariables.map((v) => (
+                      <SelectItem key={v} value={v}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* 缺失分析可视化切换按钮（显眼位置，保持风格） */}
+                <Button
+                  size="sm"
+                  onClick={() => setPreviewVisualMode('missing')}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  aria-label="切换至缺失分析可视化视图"
+                >
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  缺失分析可视化
+                </Button>
+              </div>
             </div>
-          </div>
-          <div className="text-sm text-gray-600">
-            共计 <span className="font-semibold">7504</span> 行
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">
-                    <div className="bg-red-500 text-white px-2 py-1 rounded text-xs">序号</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">PassengerId</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Survived</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Pclass</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Name</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Sex</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-orange-500 text-white px-2 py-1 rounded text-xs">Age</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">SibSp</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Parch</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Ticket</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Fare</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-orange-500 text-white px-2 py-1 rounded text-xs">Cabin</div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Embarked</div>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {getFilteredData().slice(0, selectedRows).map((row, index) => (
-                  <TableRow key={row.PassengerId}>
-                    <TableCell className="font-medium">{index + 1}</TableCell>
-                    <TableCell>{row.PassengerId}</TableCell>
-                    <TableCell>{row.Survived}</TableCell>
-                    <TableCell>{row.Pclass}</TableCell>
-                    <TableCell className="max-w-xs truncate">{row.Name}</TableCell>
-                    <TableCell>{row.Sex}</TableCell>
-                    <TableCell>{row.Age || <span className="text-red-500">NaN</span>}</TableCell>
-                    <TableCell>{row.SibSp}</TableCell>
-                    <TableCell>{row.Parch}</TableCell>
-                    <TableCell>{row.Ticket}</TableCell>
-                    <TableCell>{row.Fare}</TableCell>
-                    <TableCell>{row.Cabin || <span className="text-red-500">NaN</span>}</TableCell>
-                    <TableCell>{row.Embarked}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-
-  const renderMissingAnalysis = () => (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">缺失分析</h2>
-        <p className="text-gray-600 mt-1">分析数据集中的缺失值模式和分布</p>
-      </div>
-
-      {/* 缺失值统计（前端 mock 数据展示） */}
-      <div className="overflow-x-auto">
-        {(() => {
-          const m = getMissingAnalysisMock();
-          const pairLabel = m.correlationPair ? `${m.correlationPair[0]} ↔ ${m.correlationPair[1]}` : "无明显相关";
-          return (
-            <div className="flex items-stretch space-x-4 min-w-max">
-              <Card className="flex-none w-[240px]">
-                <CardContent className="p-4">
-                  <div className="flex items-center space-x-2">
-                    <AlertTriangle className="h-5 w-5 text-orange-500" />
-                    <div>
-                      <p className="text-sm text-gray-600">缺失值比例</p>
-                      <p className="text-2xl font-bold">{m.missingRatio.toFixed(1)}%</p>
-                      <p className="text-xs text-gray-500 mt-1">缺失单元: {m.missingCells}/{m.totalCells}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="flex-none w-[240px]">
-                <CardContent className="p-4">
-                  <div className="flex items-center space-x-2">
-                    <Database className="h-5 w-5 text-blue-500" />
-                    <div>
-                      <p className="text-sm text-gray-600">含缺失行比例</p>
-                      <p className="text-2xl font-bold">{m.rowsWithMissingRatio.toFixed(1)}%</p>
-                      <p className="text-xs text-gray-500 mt-1">含缺失行: {m.rowsWithMissing}/{m.totalRows}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="flex-none w-[300px]">
-                <CardContent className="p-4">
-                  <div className="flex items-center space-x-2">
-                    <Activity className="h-5 w-5 text-green-600" />
-                    <div className="flex-1">
-                      <p className="text-sm text-gray-600">缺失模式分布</p>
-                      <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-gray-700">
-                        <div>完整行占比: <span className="font-semibold">{((m.completeRows / m.totalRows) * 100).toFixed(1)}%</span></div>
-                        <div>单字段缺失占比: <span className="font-semibold">{((m.singleMissingRows / m.totalRows) * 100).toFixed(1)}%</span></div>
-                        <div>多字段缺失占比: <span className="font-semibold">{((m.multiMissingRows / m.totalRows) * 100).toFixed(1)}%</span></div>
-                      </div>
-                      <div className="mt-2 space-y-1">
-                        {Object.entries(m.fieldMissingCounts)
-                          .sort((a, b) => b[1] - a[1])
-                          .slice(0, 3)
-                          .map(([f, c]) => {
-                            const ratio = m.totalRows === 0 ? 0 : c / m.totalRows;
-                            return (
-                              <div key={f} className="flex items-center gap-2">
-                                <span className="w-20 text-xs text-gray-600">{f}</span>
-                                <div className="flex-1 h-2 bg-gray-200 rounded">
-                                  <div className="h-2 bg-orange-500 rounded" style={{ width: `${(ratio * 100).toFixed(1)}%` }} />
+            <div className="text-sm text-gray-600">
+              共计 <span className="font-semibold">7504</span> 行
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  {/* 新增：问题比例标签行（与列宽对齐） */}
+                  {(() => {
+                    const stats = calcColumnStats();
+                    const makeLabel = (field: keyof DataRow) => {
+                      const s = stats[String(field)];
+                      if (!s) return null;
+                      const hasMissing = s.missingCount > 0;
+                      const hasUnique = s.uniqueCount > 0;
+                      if (!hasMissing && !hasUnique) return <div className="h-6" aria-hidden />;
+                      // 同时存在时，按需求同时展示两枚标签：红色（缺失）在上，橙色（唯一）在下
+                      return (
+                        <div className="flex flex-col gap-1">
+                          {hasMissing && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  // 明确使用内联样式确保背景为红色 (Tailwind red-600 => #DC2626)，避免被上层样式覆盖
+                                  style={{ backgroundColor: '#DC2626' }}
+                                  className={`inline-flex items-center justify-center text-white h-6 text-xs rounded px-2 py-1 cursor-pointer select-none`}
+                                  onClick={() => {
+                                    setMissingField(field);
+                                    setMissingOnly(true);
+                                    setUniqueOnly(false);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      setMissingField(field);
+                                      setMissingOnly(true);
+                                      setUniqueOnly(false);
+                                    }
+                                  }}
+                                  aria-label={`字段 ${String(field)} 的缺失率：${s.missingRate.toFixed(1)}%`}
+                                >
+                                  缺失率: {s.missingRate.toFixed(1)}%
                                 </div>
-                                <span className="text-xs text-gray-600">{(ratio * 100).toFixed(1)}%</span>
-                              </div>
-                            );
-                          })}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">Top缺失字段: {m.topMissingFields.join(", ") || "—"}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="flex-none w-[260px]">
-                <CardContent className="p-4">
-                  <div className="flex items-center space-x-2">
-                    <TrendingUp className="h-5 w-5 text-indigo-600" />
-                    <div>
-                      <p className="text-sm text-gray-600">缺失特征相关性</p>
-                      <p className="text-base font-semibold">{pairLabel}</p>
-                      <p className="text-xs text-gray-500 mt-1">Jaccard: {m.correlationScore.toFixed(1)}%</p>
-                      <div className="mt-2 space-y-1 text-xs">
-                        {m.topPairs.map(({ pair, scorePercent }, idx) => (
-                          <div key={`${pair[0]}-${pair[1]}-${idx}`} className="flex items-center justify-between">
-                            <span>{pair[0]} & {pair[1]}</span>
-                            <span>{scorePercent.toFixed(1)}%</span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <div className="text-xs">{String(field)} 缺失 {s.missingCount} / {mockData.length} 行（{s.missingRate.toFixed(1)}%）</div>
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                          {hasUnique && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  style={{ backgroundColor: '#F97316' }}
+                                  className={`inline-flex items-center justify-center text-white h-6 text-xs rounded px-2 py-1 cursor-pointer select-none`}
+                                  onClick={() => {
+                                    setUniqueField(field);
+                                    setUniqueOnly(true);
+                                    setMissingOnly(false);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      setUniqueField(field);
+                                      setUniqueOnly(true);
+                                      setMissingOnly(false);
+                                    }
+                                  }}
+                                  aria-label={`字段 ${String(field)} 的唯一值数量：${s.uniqueCount}`}
+                                >
+                                  唯一值: {s.uniqueCount}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <div className="text-xs">{String(field)} 唯一值 {s.uniqueCount} / {mockData.length} 行（{s.uniqueRate.toFixed(1)}%）</div>
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                      );
+                    };
+                    return (
+                      <TableRow>
+                        <TableHead className="w-12"><div className="h-6" aria-hidden /></TableHead>
+                        <TableHead>{makeLabel('PassengerId')}</TableHead>
+                        <TableHead>{makeLabel('Survived')}</TableHead>
+                        <TableHead>{makeLabel('Pclass')}</TableHead>
+                        <TableHead>{makeLabel('Name')}</TableHead>
+                        <TableHead>{makeLabel('Sex')}</TableHead>
+                        <TableHead>{makeLabel('Age')}</TableHead>
+                        <TableHead>{makeLabel('SibSp')}</TableHead>
+                        <TableHead>{makeLabel('Parch')}</TableHead>
+                        <TableHead>{makeLabel('Ticket')}</TableHead>
+                        <TableHead>{makeLabel('Fare')}</TableHead>
+                        <TableHead>{makeLabel('Cabin')}</TableHead>
+                        <TableHead>{makeLabel('Embarked')}</TableHead>
+                      </TableRow>
+                    );
+                  })()}
+                  <TableRow>
+                    <TableHead className="w-12">
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">序号</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">PassengerId</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Survived</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Pclass</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Name</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Sex</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Age</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">SibSp</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Parch</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Ticket</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Fare</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Cabin</div>
+                    </TableHead>
+                    <TableHead>
+                      <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">Embarked</div>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {getFilteredData().slice(0, selectedRows).map((row, index) => (
+                    <TableRow key={row.PassengerId}>
+                      <TableCell className="font-medium">{index + 1}</TableCell>
+                      <TableCell>{row.PassengerId}</TableCell>
+                      <TableCell>{row.Survived}</TableCell>
+                      <TableCell>{row.Pclass}</TableCell>
+                      <TableCell className="max-w-xs truncate">{row.Name}</TableCell>
+                      <TableCell>{row.Sex}</TableCell>
+                      <TableCell>{row.Age || <span className="text-red-500">NaN</span>}</TableCell>
+                      <TableCell>{row.SibSp}</TableCell>
+                      <TableCell>{row.Parch}</TableCell>
+                      <TableCell>{row.Ticket}</TableCell>
+                      <TableCell>{row.Fare}</TableCell>
+                      <TableCell>{row.Cabin || <span className="text-red-500">NaN</span>}</TableCell>
+                      <TableCell>{row.Embarked}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="fade-in">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>数据缺失分析</CardTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">显示模式:</span>
+                <Button variant={heatmapMode === 'sample' ? 'default' : 'outline'} size="sm" onClick={() => setHeatmapMode('sample')}>按行抽样</Button>
+                <Button variant={heatmapMode === 'column' ? 'default' : 'outline'} size="sm" onClick={() => setHeatmapMode('column')}>按列聚合</Button>
+                <Button variant="outline" size="sm" onClick={() => setPreviewVisualMode('table')}>
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  返回数据表预览
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {(() => {
+              const m = getMissingAnalysisMock();
+              const sampleRows = Math.min(m.totalRows, 10000);
+              if (heatmapMode === 'sample') {
+                return (
+                  <div className="h-96 bg-gray-50 rounded-lg p-4">
+                    <div className="flex flex-col h-full">
+                      <div className="flex mb-2 text-xs">
+                        <div className="w-16"></div>
+                        {allVariables.map((variable) => (
+                          <div key={variable} className="flex-1 text-center transform -rotate-45 origin-center">
+                            {variable}
                           </div>
                         ))}
                       </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* 缺失值矩阵 */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>数据缺失分析</CardTitle>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">显示模式:</span>
-              <Button variant={heatmapMode === 'sample' ? 'default' : 'outline'} size="sm" onClick={() => setHeatmapMode('sample')}>按行抽样</Button>
-              <Button variant={heatmapMode === 'column' ? 'default' : 'outline'} size="sm" onClick={() => setHeatmapMode('column')}>按列聚合</Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {(() => {
-            const m = getMissingAnalysisMock();
-            const sampleRows = Math.min(m.totalRows, 10000);
-            if (heatmapMode === 'sample') {
-              return (
-                <div className="h-96 bg-gray-50 rounded-lg p-4">
-                  <div className="flex flex-col h-full">
-                    <div className="flex mb-2 text-xs">
-                      <div className="w-16"></div>
-                      {allVariables.map((variable) => (
-                        <div key={variable} className="flex-1 text-center transform -rotate-45 origin-center">
-                          {variable}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex-1 overflow-auto">
-                      {Array.from({ length: sampleRows }, (_, rowIndex) => (
-                        <div key={rowIndex} className="flex items-center mb-1">
-                          <div className="w-16 text-xs text-gray-600">{rowIndex + 1}</div>
-                          {allVariables.map((variable) => (
-                            <div key={variable} className="flex-1 h-4 mx-0.5">
-                              <div className={`h-full ${m.indicators[variable]?.[rowIndex] ? 'bg-white border border-gray-300' : 'bg-blue-500'}`} />
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-2">抽样显示 {sampleRows} 行（上限 10k）</div>
-                  </div>
-                </div>
-              );
-            } else {
-              return (
-                <div className="h-64 bg-gray-50 rounded-lg p-4">
-                  <div className="flex flex-col h-full">
-                    <div className="flex mb-2 text-xs">
-                      <div className="w-16"></div>
-                      {allVariables.map((variable) => (
-                        <div key={variable} className="flex-1 text-center transform -rotate-45 origin-center">
-                          {variable}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex items-center">
-                      <div className="w-16 text-xs text-gray-600">列聚合</div>
-                      {allVariables.map((variable) => {
-                        const c = m.fieldMissingCounts[variable] || 0;
-                        const ratio = m.totalRows === 0 ? 0 : c / m.totalRows;
-                        const alpha = 0.2 + 0.8 * ratio;
-                        return (
-                          <div key={variable} className="flex-1 h-6 mx-0.5 rounded relative">
-                            <div className="h-full rounded" style={{ backgroundColor: `rgba(59,130,246,${alpha})` }} />
+                      <div className="flex-1 overflow-auto">
+                        {Array.from({ length: sampleRows }, (_, rowIndex) => (
+                          <div key={rowIndex} className="flex items-center mb-1">
+                            <div className="w-16 text-xs text-gray-600">{rowIndex + 1}</div>
+                            {allVariables.map((variable) => (
+                              <div key={variable} className="flex-1 h-4 mx-0.5">
+                                <div className={`h-full ${m.indicators[variable]?.[rowIndex] ? 'bg-white border border-gray-300' : 'bg-blue-500'}`} />
+                              </div>
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-                    <div className="flex items-center mt-2">
-                      <div className="w-16"></div>
-                      {allVariables.map((variable) => {
-                        const c = m.fieldMissingCounts[variable] || 0;
-                        const ratio = m.totalRows === 0 ? 0 : c / m.totalRows;
-                        return (
-                          <div key={variable} className="flex-1 text-center text-xs text-gray-600">{(ratio * 100).toFixed(1)}%</div>
-                        );
-                      })}
+                        ))}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">抽样显示 {sampleRows} 行（上限 10k）</div>
                     </div>
                   </div>
-                </div>
-              );
-            }
-          })()}
-        </CardContent>
-      </Card>
+                );
+              } else {
+                return (
+                  <div className="h-64 bg-gray-50 rounded-lg p-4">
+                    <div className="flex flex-col h-full">
+                      <div className="flex mb-2 text-xs">
+                        <div className="w-16"></div>
+                        {allVariables.map((variable) => (
+                          <div key={variable} className="flex-1 text-center transform -rotate-45 origin-center">
+                            {variable}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center">
+                        <div className="w-16 text-xs text-gray-600">列聚合</div>
+                        {allVariables.map((variable) => {
+                          const c = m.fieldMissingCounts[variable] || 0;
+                          const ratio = m.totalRows === 0 ? 0 : c / m.totalRows;
+                          const alpha = 0.2 + 0.8 * ratio;
+                          return (
+                            <div key={variable} className="flex-1 h-6 mx-0.5 rounded relative">
+                              <div className="h-full rounded" style={{ backgroundColor: `rgba(59,130,246,${alpha})` }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex items-center mt-2">
+                        <div className="w-16"></div>
+                        {allVariables.map((variable) => {
+                          const c = m.fieldMissingCounts[variable] || 0;
+                          const ratio = m.totalRows === 0 ? 0 : c / m.totalRows;
+                          return (
+                            <div key={variable} className="flex-1 text-center text-xs text-gray-600">{(ratio * 100).toFixed(1)}%</div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+            })()}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
+
+  // 缺失分析标签页入口已移除
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -890,31 +936,25 @@ export function DataDetailFullPage({ dataset, onClose, initialTab }: DataDetailF
           >
             数据概览及变量
           </button>
-          <button
-            className={`py-4 px-2 border-b-2 font-medium text-sm ${
-              activeTab === "missing"
-                ? "border-orange-500 text-orange-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-            onClick={() => setActiveTab("missing")}
-          >
-            缺失分析
-          </button>
+          {/* 缺失分析入口已移除，改由“数据表预览”卡片内的按钮触发 */}
         </div>
       </div>
 
       {/* 主要内容区域 */}
       <div className="p-6">
         {activeTab === "versions" && (
-          <VersionHistory
-            datasetId={meta.id}
-            datasetName={meta.name}
-            onBack={() => setActiveTab("overview")}
-            onSwitchVersion={handleSwitchVersion}
-          />
+          <div className="fade-in">
+            <VersionHistory
+              datasetId={meta.id}
+              datasetName={meta.name}
+              onBack={() => setActiveTab("overview")}
+              onSwitchVersion={handleSwitchVersion}
+            />
+          </div>
         )}
-        {activeTab === "overview" && renderDataOverview()}
-        {activeTab === "missing" && renderMissingAnalysis()}
+        {activeTab === "overview" && (
+          <div className="fade-in">{renderDataOverview()}</div>
+        )}
       </div>
     </div>
   );

@@ -22,6 +22,7 @@ import {
   Square
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLanguage } from "../i18n/LanguageContext";
 
 interface DataUploadProps {
   isOpen: boolean;
@@ -58,6 +59,7 @@ interface FormData {
 }
 
 export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps) {
+  const { t } = useLanguage();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [formData, setFormData] = useState<FormData>({
@@ -94,7 +96,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     { id: 'proj_004', name: '设备故障预测' }
   ];
 
-  const getProjectName = (id: string) => mockProjects.find(p => p.id === id)?.name || '未选择项目';
+  const getProjectName = (id: string) => mockProjects.find(p => p.id === id)?.name || t('data.projects.noneSelected');
 
   // 重置状态
   const resetState = useCallback(() => {
@@ -138,15 +140,15 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
       const isValidSize = file.size <= 1024 * 1024 * 1024; // 1GB
 
       if (!isValidType) {
-        toast.error(`文件 ${file.name} 格式不支持`, {
-          description: '支持的格式：CSV、Excel、JSON'
+        toast.error(`${t('data.upload.toast.unsupportedFormat')}: ${file.name}`, {
+          description: t('data.upload.toast.supportedFormatsDesc')
         });
         return false;
       }
 
       if (!isValidSize) {
-        toast.error(`文件 ${file.name} 大小超过限制`, {
-          description: '文件大小不能超过 1GB'
+        toast.error(`${t('data.upload.toast.sizeExceeded')}: ${file.name}`, {
+          description: t('data.upload.toast.sizeLimitDesc')
         });
         return false;
       }
@@ -277,7 +279,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     
     // 检查是否已存在相同名称的标签
     if (formData.tags.some(tag => tag.name === newTagName.trim())) {
-      toast.error('标签已存在');
+      toast.error(t('data.upload.toast.tagExists'));
       return;
     }
 
@@ -329,7 +331,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
           `3) 依据业务字段进行聚合统计与报表导出。\n` +
           `指令: ${prompt}\n上下文: ${schemaSummary}`
         );
-        toast.info('已使用本地模拟处理（未配置大模型 API 密钥）');
+        toast.info(t('data.upload.toast.localSimulate'));
       } else {
         const resp = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
@@ -348,14 +350,14 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
         });
         if (!resp.ok) throw new Error(`LLM 请求失败: ${resp.status}`);
         const data = await resp.json();
-        const content = data?.choices?.[0]?.message?.content || '无返回内容';
+        const content = data?.choices?.[0]?.message?.content || t('common.noContent');
         setLlmResult(content);
-        toast.success('已根据语义指令生成处理方案');
+        toast.success(t('data.upload.toast.planGenerated'));
       }
     } catch (err: any) {
       console.error(err);
       setLlmResult(`处理失败：${err?.message || '未知错误'}`);
-      toast.error('语义指令处理失败');
+      toast.error(t('data.upload.toast.semanticFailed'));
     } finally {
       setLlmProcessing(false);
     }
@@ -364,17 +366,17 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
   // 开始上传
   const handleStartUpload = useCallback(async () => {
     if (!formData.name.trim()) {
-      toast.error('请输入数据集名称');
+      toast.error(t('data.upload.toast.nameRequired'));
       return;
     }
 
     if (!formData.projectId) {
-      toast.error('请选择所属项目');
+      toast.error(t('data.upload.toast.projectRequired'));
       return;
     }
 
     if (files.length === 0) {
-      toast.error('请选择要上传的文件');
+      toast.error(t('data.upload.toast.selectFiles'));
       return;
     }
 
@@ -384,8 +386,8 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
       // 并行上传所有文件
       await Promise.all(files.map(uploadFile));
       
-      toast.success('数据上传成功', {
-        description: `已成功上传 ${files.length} 个文件`
+      toast.success(t('data.upload.toast.uploadSuccess'), {
+        description: `${t('data.upload.toast.uploadSuccessDescPrefix')} ${files.length} ${t('data.upload.toast.uploadSuccessDescSuffix')}`
       });
 
       // 调用成功回调
@@ -400,8 +402,8 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
       }, 1500);
 
     } catch (error) {
-      toast.error('上传失败', {
-        description: '请检查网络连接后重试'
+      toast.error(t('data.upload.toast.uploadFailed'), {
+        description: t('data.upload.toast.checkNetwork')
       });
     } finally {
       setIsUploading(false);
@@ -411,7 +413,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
   // 关闭对话框
   const handleClose = useCallback(() => {
     if (isUploading) {
-      toast.warning('上传进行中，请稍候');
+      toast.warning(t('data.upload.toast.uploadingWait'));
       return;
     }
     // 关闭对话框时停止语音采集与识别
@@ -445,15 +447,15 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
   const getFileStatusText = (status: UploadFile['status']) => {
     switch (status) {
       case 'uploading':
-        return '上传中';
+        return t('data.upload.status.uploading');
       case 'parsing':
-        return '解析中';
+        return t('data.upload.status.parsing');
       case 'success':
-        return '完成';
+        return t('data.upload.status.success');
       case 'error':
-        return '失败';
+        return t('data.upload.status.error');
       default:
-        return '等待上传';
+        return t('data.upload.status.pending');
     }
   };
 
@@ -461,7 +463,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
   const initSpeechRecognition = useCallback(() => {
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     if (!SpeechRecognition) {
-      toast.error('当前浏览器不支持语音识别', { description: '建议使用最新的 Chrome/Edge 浏览器' });
+      toast.error(t('voice.errors.browserNotSupported'), { description: t('voice.errors.recommendChromeEdge') });
       setSpeechStatus('error');
       return;
     }
@@ -561,7 +563,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     } catch (err) {
       console.error(err);
       setSpeechStatus('error');
-      toast.error('无法启动语音输入', { description: '请检查麦克风权限设置' });
+      toast.error(t('voice.errors.cannotStart'), { description: t('voice.errors.checkMicPermission') });
     }
   }, [isListening, initSpeechRecognition, drawWaveform]);
 
@@ -594,9 +596,9 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-full sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>数据上传</DialogTitle>
+          <DialogTitle>{t('data.upload.title')}</DialogTitle>
           <DialogDescription>
-            支持 CSV、Excel、JSON 格式，单文件最大 1GB
+            {t('data.upload.description')}
           </DialogDescription>
         </DialogHeader>
 
@@ -604,22 +606,22 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
           {/* 基本信息表单 */}
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="name">数据集名称 *</Label>
+              <Label htmlFor="name">{t('data.form.name')} *</Label>
               <Input
                 id="name"
-                placeholder="请输入数据集名称"
+                placeholder={t('data.upload.form.name.placeholder')}
                 value={formData.name}
                 onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="project">所属项目 *</Label>
+              <Label htmlFor="project">{t('data.form.project')} *</Label>
               <Select
                 value={formData.projectId}
                 onValueChange={(value: string) => setFormData(prev => ({ ...prev, projectId: value }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="请选择所属项目" />
+                  <SelectValue placeholder={t('data.upload.form.project.placeholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {mockProjects.map(p => (
@@ -629,7 +631,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="permission">权限设置</Label>
+              <Label htmlFor="permission">{t('data.form.permission')}</Label>
               <Select
                 value={formData.permission}
                 onValueChange={(value: 'team' | 'public') => 
@@ -640,8 +642,8 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="team">团队</SelectItem>
-                  <SelectItem value="public">公开</SelectItem>
+                  <SelectItem value="team">{t('permission.team')}</SelectItem>
+                  <SelectItem value="public">{t('permission.public')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -651,26 +653,26 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
           <div className="rounded-md border p-3 bg-gray-50">
             <div className="flex items-center gap-2 mb-2">
               {formData.permission === 'public' ? (
-                <Badge variant="default" className="bg-green-100 text-green-700 border-green-200">公开数据</Badge>
+                <Badge variant="default" className="bg-green-100 text-green-700 border-green-200">{t('data.visibility.publicData')}</Badge>
               ) : (
-                <Badge variant="outline" className="border-purple-300 text-purple-700">项目内数据</Badge>
+                <Badge variant="outline" className="border-purple-300 text-purple-700">{t('data.visibility.projectData')}</Badge>
               )}
               <span className="text-sm text-gray-700">
                 {formData.permission === 'public'
-                  ? '公开权限将允许非项目成员查看该数据（覆盖项目归属限制）'
-                  : `仅项目“${getProjectName(formData.projectId)}”成员可见`}
+                  ? t('data.visibility.publicHint')
+                  : `${t('data.visibility.projectMembersOnly')}（${getProjectName(formData.projectId)}）`}
               </span>
             </div>
             <p className="text-xs text-gray-500">
-              注意：所属项目为必填项；默认仅对项目成员可见；将权限设置为“公开”后，任何用户均可查看。
+              {t('data.visibility.note')}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">描述</Label>
+            <Label htmlFor="description">{t('data.form.description')}</Label>
             <Textarea
               id="description"
-              placeholder="请输入数据集的详细描述，包括数据内容、用途等信息"
+              placeholder={t('data.upload.form.description.placeholder')}
               value={formData.description}
               onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
               rows={3}
@@ -679,12 +681,12 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
 
           {/* 数据标签 */}
           <div className="space-y-2">
-            <Label>数据标签</Label>
+            <Label>{t('data.form.tags')}</Label>
             <div className="space-y-3">
               {/* 标签输入 */}
               <div className="flex gap-2">
                 <Input
-                  placeholder="输入标签名称"
+                  placeholder={t('data.form.inputTagName')}
                   value={newTagName}
                   onChange={(e) => setNewTagName(e.target.value)}
                   onKeyPress={(e) => {
@@ -701,7 +703,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                   disabled={!newTagName.trim()}
                   size="sm"
                 >
-                  添加
+                  {t('common.add')}
                 </Button>
               </div>
               
@@ -733,46 +735,46 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
             <div className="space-y-4">
               {/* 原型图示例区块 */}
               <Card>
-                <CardHeader>
-                  <CardTitle>原型图示例（流程预览）</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-3 rounded-md border bg-white">
-                      <div className="text-sm font-medium">数据分析</div>
-                      <p className="text-xs text-gray-600 mt-1">字段类型识别、缺失值/异常值检测</p>
+                  <CardHeader>
+                    <CardTitle>{t('data.upload.prototype.title')}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="p-3 rounded-md border bg-white">
+                        <div className="text-sm font-medium">{t('data.upload.prototype.step.analysis.name')}</div>
+                        <p className="text-xs text-gray-600 mt-1">{t('data.upload.prototype.step.analysis.desc')}</p>
+                      </div>
+                      <div className="p-3 rounded-md border bg-white">
+                        <div className="text-sm font-medium">{t('data.upload.prototype.step.strategy.name')}</div>
+                        <p className="text-xs text-gray-600 mt-1">{t('data.upload.prototype.step.strategy.desc')}</p>
+                      </div>
+                      <div className="p-3 rounded-md border bg-white">
+                        <div className="text-sm font-medium">{t('data.upload.prototype.step.clean.name')}</div>
+                        <p className="text-xs text-gray-600 mt-1">{t('data.upload.prototype.step.clean.desc')}</p>
+                      </div>
+                      <div className="p-3 rounded-md border bg-white">
+                        <div className="text-sm font-medium">{t('data.upload.prototype.step.review.name')}</div>
+                        <p className="text-xs text-gray-600 mt-1">{t('data.upload.prototype.step.review.desc')}</p>
+                      </div>
                     </div>
-                    <div className="p-3 rounded-md border bg-white">
-                      <div className="text-sm font-medium">策略选择</div>
-                      <p className="text-xs text-gray-600 mt-1">按质量问题自动匹配最佳清洗方案</p>
-                    </div>
-                    <div className="p-3 rounded-md border bg-white">
-                      <div className="text-sm font-medium">执行清洗</div>
-                      <p className="text-xs text-gray-600 mt-1">规范化、补全、去重、异常修正</p>
-                    </div>
-                    <div className="p-3 rounded-md border bg-white">
-                      <div className="text-sm font-medium">查看结果</div>
-                      <p className="text-xs text-gray-600 mt-1">报告与预览，支持回滚与导出</p>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-3">自动模式会自动分析并清洗数据，您也可以通过语音指令微调策略。</p>
-                </CardContent>
-              </Card>
+                    <p className="text-xs text-gray-500 mt-3">{t('data.upload.prototype.autoModeHint')}</p>
+                  </CardContent>
+                </Card>
 
               {/* 语音指令输入模块 */}
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>语音指令输入</CardTitle>
+                  <CardTitle>{t('voice.input.title')}</CardTitle>
                   <div className="flex items-center gap-2 text-sm">
                     <span className={
                       speechStatus === 'listening' ? 'text-green-600' :
                       speechStatus === 'processing' ? 'text-blue-600' :
                       speechStatus === 'error' ? 'text-red-600' : 'text-gray-600'
                     }>
-                      {speechStatus === 'idle' && '空闲'}
-                      {speechStatus === 'listening' && '监听中'}
-                      {speechStatus === 'processing' && '初始化中'}
-                      {speechStatus === 'error' && '异常'}
+                      {speechStatus === 'idle' && t('voice.status.idle')}
+                      {speechStatus === 'listening' && t('voice.status.listening')}
+                      {speechStatus === 'processing' && t('voice.status.processing')}
+                      {speechStatus === 'error' && t('voice.status.error')}
                     </span>
                   </div>
                 </CardHeader>
@@ -786,7 +788,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                       disabled={isListening}
                       className="flex items-center gap-2"
                     >
-                      <Mic className="h-4 w-4" /> 开始录音
+                      <Mic className="h-4 w-4" /> {t('voice.actions.startRecording')}
                     </Button>
                     <Button
                       type="button"
@@ -796,9 +798,9 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                       disabled={!isListening}
                       className="flex items-center gap-2"
                     >
-                      <Square className="h-4 w-4" /> 停止
+                      <Square className="h-4 w-4" /> {t('voice.actions.stop')}
                     </Button>
-                    <span className="text-xs text-gray-500">支持实时识别与显示，中文优先。</span>
+                    <span className="text-xs text-gray-500">{t('voice.input.helper')}</span>
                   </div>
 
                   {/* 波形可视化 */}
@@ -808,11 +810,11 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
 
                   {/* 实时识别文本 */}
                   <div className="space-y-2">
-                    <Label>实时识别文本</Label>
+                    <Label>{t('voice.input.transcriptLabel')}</Label>
                     <Textarea
                       value={speechText}
                       readOnly
-                      placeholder="语音识别内容将实时显示在此，您可以继续录音或点击停止。"
+                      placeholder={t('voice.input.transcriptPlaceholder')}
                       className="min-h-[80px]"
                     />
                   </div>
@@ -823,7 +825,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
 
           {/* 文件上传区域 */}
           <div className="space-y-4">
-            <Label>文件上传</Label>
+            <Label>{t('data.upload.files.label')}</Label>
             <div
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
                 isDragOver 
@@ -837,17 +839,17 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
               <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <div className="space-y-2">
                 <p className="text-lg font-medium text-gray-900">
-                  拖拽文件到此处，或
+                  {t('data.upload.dragDrop.prompt')}
                   <Button
                     variant="link"
                     className="p-0 h-auto font-medium"
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    点击选择文件
+                    {t('data.upload.dragDrop.select')}
                   </Button>
                 </p>
                 <p className="text-sm text-gray-500">
-                  支持 CSV、Excel、JSON 格式，单文件最大 1GB
+                  {t('data.upload.description')}
                 </p>
               </div>
               <input
@@ -864,7 +866,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
           {/* 文件列表 */}
           {files.length > 0 && (
             <div className="space-y-4">
-              <Label>文件列表</Label>
+              <Label>{t('data.upload.fileList.label')}</Label>
               <div className="space-y-3">
                 {files.map((fileItem) => (
                   <Card key={fileItem.id}>
@@ -887,7 +889,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                               onClick={() => retryUpload(fileItem.id)}
                             >
                               <RefreshCw className="h-4 w-4 mr-1" />
-                              重试
+                              {t('task.actions.retry')}
                             </Button>
                           )}
                           {fileItem.status === 'pending' && (
@@ -908,8 +910,8 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                           <Progress value={fileItem.progress} className="h-2" />
                           <p className="text-xs text-gray-500">
                             {fileItem.status === 'uploading' 
-                              ? `上传进度: ${fileItem.progress}%` 
-                              : '正在解析文件结构...'}
+                              ? `${t('data.upload.progress')}: ${fileItem.progress}%` 
+                              : t('data.upload.parsingStructure')}
                           </p>
                         </div>
                       )}
@@ -925,9 +927,9 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                       {fileItem.status === 'success' && fileItem.parsedData && (
                         <div className="mt-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <h4 className="font-medium">解析结果</h4>
+                            <h4 className="font-medium">{t('data.upload.parsedResult')}</h4>
                             <Badge variant="secondary">
-                              {fileItem.parsedData.rowCount} 行 • {fileItem.parsedData.fields.length} 列
+                              {fileItem.parsedData.rowCount} {t('data.upload.rows')} • {fileItem.parsedData.fields.length} {t('data.upload.columns')}
                             </Badge>
                           </div>
                           
@@ -936,11 +938,11 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
                             <Table>
                               <TableHeader>
                                 <TableRow>
-                                  <TableHead>字段名</TableHead>
-                                  <TableHead>类型</TableHead>
-                                  <TableHead>缺失值</TableHead>
-                                  <TableHead>唯一值</TableHead>
-                                  <TableHead>示例</TableHead>
+                                  <TableHead>{t('data.upload.table.fieldName')}</TableHead>
+                                  <TableHead>{t('data.upload.table.type')}</TableHead>
+                                  <TableHead>{t('data.upload.table.missingValues')}</TableHead>
+                                  <TableHead>{t('data.upload.table.uniqueValues')}</TableHead>
+                                  <TableHead>{t('data.upload.table.example')}</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -963,7 +965,7 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
 
                           {/* 数据预览 */}
                           <div className="space-y-2">
-                            <h5 className="font-medium">数据预览</h5>
+                            <h5 className="font-medium">{t('data.upload.preview')}</h5>
                             <div className="border rounded-lg overflow-hidden">
                               <Table>
                                 <TableHeader>
@@ -1001,18 +1003,18 @@ export function DataUpload({ isOpen, onClose, onUploadSuccess }: DataUploadProps
           {/* 操作按钮 */}
           <div className="flex justify-end space-x-3 pt-4 border-t">
             <Button variant="outline" onClick={handleClose} disabled={isUploading}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button onClick={handleStartUpload} disabled={isUploading || files.length === 0}>
               {isUploading ? (
                 <>
                   <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  上传中...
+                  {t('data.upload.actions.uploading')}
                 </>
               ) : (
                 <>
                   <Upload className="h-4 w-4 mr-2" />
-                  开始上传
+                  {t('data.upload.actions.start')}
                 </>
               )}
             </Button>

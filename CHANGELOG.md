@@ -22,6 +22,16 @@
 
 ## 变更历史
 
+### 2025-10-31
+- [Feat/I18n/DataUpload] 国际化 DataUpload 组件：导入 useLanguage、初始化 t、替换表单标签/占位、状态文案、toast 提示、语音模块、文件上传区域、解析结果表头、操作按钮等为 t() 键。
+  - 涉及文件：
+    - src/components/DataUpload.tsx
+    - src/i18n/LanguageContext.tsx
+  - 新增 i18n 键：
+    - common.noContent
+    - data.projects.noneSelected
+  - 说明/验证：运行 `npm run dev`，在 http://localhost:3002/ 打开数据上传弹窗，切换中英文验证文案均正确国际化；控制台无报错。
+
 ### 2025-10-29
 - [Feat/TaskDetail/Export] 预测结果表支持“一键导出 CSV”（utf-8-sig + BOM），导出列顺序与页面一致，并采用整表数据（不受分页限制）。
   - 细节：
@@ -133,12 +143,12 @@
 
 ### 2025-10-21
 - [Feature/UI] 数据预处理：新增“数据转换（numeric_transform）”规则配置区，支持多字段选择与方法参数设置
-  - 方法：Min-Max、Z-score、Robust、Max-Abs、小数缩放、单位向量；提供默认参数与输入校验；按样本归一化在单字段时给出非阻塞提示
+  - 方法：对数变换、平方根变换、Box-Cox、Yeo-Johnson、分位数变换；提供默认参数与输入校验；Box-Cox/Yeo-Johnson 的 λ 支持自动估计；分位数变换支持分位数数目与输出分布选择
   - 涉及文件：
     - src/components/DataPreprocessing.tsx
   - 预览：
     - 运行 `npm run dev`；在 http://localhost:3000/ 打开“数据管理 -> 数据预处理”，新增规则类型选择“数据转换”，配置区可正常渲染与交互。
-- [Validation] 扩展 `handleApply` 对 numeric_transform 的严格校验：仅数值型字段；Min-Max 要求 min < max；Z-score 的 stdType 合法（sample/population）；Robust 的 q1/q3 在 (0,100) 且 q1<q3；Max-Abs 的 preserveSign 为布尔；小数缩放 digits 为非负整数（自动模式忽略）；单位向量 axis 合法（row/column）
+- [Validation] 扩展 `handleApply` 对 numeric_transform 的严格校验：仅数值型字段；Box-Cox/Yeo-Johnson 的 λ（若填写）需为数值；分位数变换的分位数数目需为>=2的整数，输出分布需为均匀或正态
   - 涉及文件：
     - src/components/DataPreprocessing.tsx
 - [Feature/UI] 范围值拆分（split_range）：增加“自动建议分隔符”和“检测样例”按钮；优化分隔符/正则占位符与说明文案，支持负数范围（如 -5~5）

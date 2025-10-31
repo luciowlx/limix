@@ -18,11 +18,7 @@ import {
   Database,
   Filter,
   Wand2,
-  Code,
   Play,
-  Save,
-  Download,
-  Upload,
   Eye,
   Trash2,
   Plus,
@@ -38,7 +34,6 @@ import {
   Target,
   Layers,
   RefreshCw,
-  Copy,
   Edit,
   X,
   Search
@@ -46,6 +41,8 @@ import {
 import { toast } from "sonner";
 import { SoloDataCleaning } from "./SoloDataCleaning";
 import { datasetPreviewRows } from "../mock/datasetPreview";
+import DistributionChart from "./DistributionChart";
+import { buildDistribution, applyTransform, reservoirSample } from "../utils/distribution";
 
 interface DataPreprocessingProps {
   isOpen: boolean;
@@ -108,9 +105,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   const [currentStep, setCurrentStep] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   // 已移除：processingResult 与 previewData 状态（不再使用结果预览）
-  const [jsonConfig, setJsonConfig] = useState('');
-  const [showJsonEditor, setShowJsonEditor] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // 已移除：JSON 配置编辑与导入/导出相关状态
   const [recommendedStrategies, setRecommendedStrategies] = useState<RecommendedStrategy[]>([]);
   const [recommendedQuery, setRecommendedQuery] = useState('');
   // 多选数据集：搜索与筛选（支持模糊）
@@ -151,6 +146,25 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   const [step2SecondaryVersionId, setStep2SecondaryVersionId] = useState<string | undefined>(undefined);
   const [step2AggregatedFields, setStep2AggregatedFields] = useState<AggregatedField[]>([]);
   const [oneHotMaxCols, setOneHotMaxCols] = useState(100); // One-Hot 最大支持100列
+
+  // 字段名编辑态与错误提示（用于实时校验重复与空值）
+  const [fieldNameEditValues, setFieldNameEditValues] = useState<Record<string, string>>({});
+  const [fieldNameErrors, setFieldNameErrors] = useState<Record<string, string>>({});
+
+  // 计算基于“编辑态值或当前值”的重复集合（忽略大小写，去除首尾空格）
+  const duplicateNameSet = useMemo(() => {
+    const counts: Record<string, number> = {};
+    fields.forEach(f => {
+      const proposed = (fieldNameEditValues[f.name] ?? f.name).trim().toLowerCase();
+      if (!proposed) return;
+      counts[proposed] = (counts[proposed] || 0) + 1;
+    });
+    return new Set(Object.keys(counts).filter(k => counts[k] > 1));
+  }, [fields, fieldNameEditValues]);
+
+  const hasAnyNameError = useMemo(() => {
+    return Object.keys(fieldNameErrors).length > 0 || duplicateNameSet.size > 0;
+  }, [fieldNameErrors, duplicateNameSet]);
 
   // 工具函数：获取字段的唯一值/类别数估算
   const getUniqueValueCount = (fieldName: string): number | undefined => {
@@ -572,6 +586,8 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
   // 规则级确认弹窗状态（用于填充方式等敏感操作）
   const [showRuleConfirmDialog, setShowRuleConfirmDialog] = useState(false);
   const [ruleConfirmPayload, setRuleConfirmPayload] = useState<{ ruleId: string; nextUpdates: Partial<CleaningRule>; message: string } | null>(null);
+  // 数据分布放大预览弹窗状态（基于 numeric_transform）
+  const [distView, setDistView] = useState<{ ruleId: string; field: string } | null>(null);
 
   // 打开对话框时，如果来自具体数据集入口，预选该数据集；但仍停留在 Step 0
   useEffect(() => {
@@ -725,28 +741,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
         }));
 
       setCleaningRules(defaultRules);
-      
-      // 生成 JSON 配置（与界面互操作：只输出必要字段）
-      const jsonConfigTemplate = {
-        fields: infos.filter(f => f.selected).map(f => f.name),
-        rules: defaultRules.filter(r => r.enabled).map(r => ({
-          field: r.field,
-          type: r.type,
-          config: r.config
-        })),
-        output: {
-          format: 'csv',
-          encoding: 'utf-8',
-          includeHeader: true
-        },
-        validation: {
-          strictMode: false,
-          skipErrors: true,
-          maxErrors: 100
-        }
-      };
-
-      setJsonConfig(JSON.stringify(jsonConfigTemplate, null, 2));
+      // 已移除：生成并同步 JSON 配置模板逻辑
       
     } catch (error) {
       toast.error('加载数据集信息失败');
@@ -1219,17 +1214,31 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       // 校验空值
       if (!trimmed) {
         toast.error('字段名不能为空');
+        // 保留错误提示
+        setFieldNameErrors(errs => ({ ...errs, [oldName]: '字段名不能为空' }));
         return prev;
       }
       // 校验重复（允许保持原名）
       const exists = prev.some(f => f.name === trimmed && trimmed !== oldName);
       if (exists) {
         toast.error('字段名重复，请使用唯一名称');
+        setFieldNameErrors(errs => ({ ...errs, [oldName]: '字段名重复，请使用唯一名称' }));
         return prev;
       }
       const next = prev.map(f => (f.name === oldName ? { ...f, name: trimmed } : f));
       // 同步更新清洗规则里引用的字段名
       setCleaningRules(rules => rules.map(r => (r.field === oldName ? { ...r, field: trimmed } : r)));
+      // 清理本行的编辑态与错误提示
+      setFieldNameEditValues(vals => {
+        const n = { ...vals };
+        delete n[oldName];
+        return n;
+      });
+      setFieldNameErrors(errs => {
+        const n = { ...errs };
+        delete n[oldName];
+        return n;
+      });
       return next;
     });
   };
@@ -1404,39 +1413,29 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       return;
     }
 
-    // 数据转换：方法参数校验
+    // 数据转换：方法参数校验（新方法集）
     let numericParamError: string | null = null;
     enabledRules.forEach(r => {
       if (numericParamError || r.type !== 'numeric_transform') return;
       const method = r.config?.method;
       const p = r.config?.params || {};
-      if (method === 'minmax') {
-        const mi = Number(p.min);
-        const ma = Number(p.max);
-        if (!Number.isFinite(mi) || !Number.isFinite(ma) || mi >= ma) {
-          numericParamError = '数据转换[Min-Max]：目标区间最小值应小于最大值，且均为数值';
+      if (method === 'box_cox') {
+        const lambda = p.lambda;
+        if (lambda !== undefined && lambda !== null && lambda !== '' && !Number.isFinite(Number(lambda))) {
+          numericParamError = '数据转换[Box-Cox]：λ需为数值（留空表示自动估计）';
         }
-      } else if (method === 'zscore') {
-        if (!['sample','population'].includes(p.stdType)) {
-          numericParamError = '数据转换[Z-score]：标准差类型必须为“样本(n-1)”或“总体(n)”';
+      } else if (method === 'yeo_johnson') {
+        const lambda = p.lambda;
+        if (lambda !== undefined && lambda !== null && lambda !== '' && !Number.isFinite(Number(lambda))) {
+          numericParamError = '数据转换[Yeo-Johnson]：λ需为数值（留空表示自动估计）';
         }
-      } else if (method === 'robust') {
-        const q1 = Number(p.q1);
-        const q3 = Number(p.q3);
-        if (!Number.isFinite(q1) || !Number.isFinite(q3) || q1 <= 0 || q3 >= 100 || q1 >= q3) {
-          numericParamError = '数据转换[Robust]：Q1/Q3需为0-100之间的数值且Q1<Q3';
-        }
-      } else if (method === 'decimal_scaling') {
-        const auto = !!p.auto;
-        if (!auto) {
-          const digits = Number(p.digits);
-          if (!Number.isInteger(digits) || digits < 0) {
-            numericParamError = '数据转换[小数缩放]：移动位数需为非负整数';
-          }
-        }
-      } else if (method === 'unit_vector') {
-        if (!['row','column'].includes(p.axis)) {
-          numericParamError = '数据转换[单位向量]：归一化维度需为按样本(行)或按特征(列)';
+      } else if (method === 'quantile') {
+        const nq = Number(p.nQuantiles);
+        const dist = p.outputDistribution;
+        if (!Number.isInteger(nq) || nq < 2) {
+          numericParamError = '数据转换[分位数]：分位数数目需为>=2的整数';
+        } else if (!['uniform','normal'].includes(dist)) {
+          numericParamError = '数据转换[分位数]：输出分布需为均匀或正态';
         }
       }
     });
@@ -1445,11 +1444,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
       return;
     }
 
-    // 数据转换：单位向量归一化（行）建议选择多个字段（非阻塞提示）
-    const uvRowWarn = enabledRules.some(r => r.type === 'numeric_transform' && r.config?.method === 'unit_vector' && ((r.config?.params?.axis || 'row') === 'row') && ((Array.isArray(r.config?.fields) ? r.config.fields.length : 0) < 2));
-    if (uvRowWarn) {
-      toast.warning('数据转换[单位向量]：按样本（行）归一化建议选择多个字段');
-    }
+    // 数据转换：附加非阻塞提示（例如 Box-Cox 对正值数据的要求）— 此处暂不进行自动检测，仅在参数面板显示说明。
 
     // 字符编码：需选择编码方法
     const encInvalid = enabledRules.some(r => r.type === 'encode_categorical' && (!r.config?.method));
@@ -1594,140 +1589,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
     }
   };
 
-  // 导出配置
-  const handleExportConfig = () => {
-    const config = {
-      fields: fields.filter(f => f.selected).map(f => f.name),
-      rules: cleaningRules.filter(r => r.enabled),
-      timestamp: new Date().toISOString()
-    };
-    
-    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `preprocessing_config_${activeDatasetId || 'multi'}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    
-    toast.success('配置已导出');
-  };
-
-  // 导入配置
-  const handleImportConfig = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const config = JSON.parse(e.target?.result as string);
-        
-        // 更新字段选择
-        setFields(prev => prev.map(field => ({
-          ...field,
-          selected: config.fields?.includes(field.name) || false
-        })));
-        
-        // 更新清洗规则（生成完整结构，来源默认为 custom；若与推荐策略匹配则标记为 recommended 并自动勾选推荐项）
-        if (config.rules) {
-          const imported: CleaningRule[] = (config.rules as Array<any>).map((r: any, idx: number) => ({
-            id: `rule-import-${Date.now()}-${idx}`,
-            field: r.field,
-            type: r.type,
-            config: r.config ?? {},
-            enabled: true,
-            description: r.description ?? `${r.type} - ${r.field}`,
-            source: 'custom'
-          }));
-
-          // 与推荐策略互操作：匹配并同步选择状态
-          setRecommendedStrategies(prev => {
-            let next = [...prev];
-            imported.forEach(rule => {
-              const matched = next.find(s => s.rule.field === rule.field && s.rule.type === rule.type);
-              if (matched) {
-                // 勾选推荐策略，并将规则标记来源信息
-                matched.selected = true;
-                rule.source = 'recommended';
-                rule.refId = matched.id;
-              }
-            });
-            return next;
-          });
-
-          setCleaningRules(imported);
-        }
-        
-        toast.success('配置已导入');
-      } catch (error) {
-        toast.error('配置文件格式错误');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  // 将当前界面配置同步到 JSON 文本
-  const syncUIToJson = () => {
-    try {
-      const config = {
-        // 根据当前视图（Step2 多源/多版本聚合或 Step1 单源）导出已选字段
-        fields: getCurrentViewSelectedFieldNames(),
-        rules: cleaningRules.filter(r => r.enabled).map(r => ({
-          field: r.field,
-          type: r.type,
-          config: r.config,
-          description: r.description
-        }))
-      };
-      setJsonConfig(JSON.stringify(config, null, 2));
-      toast.success('已同步界面配置到 JSON');
-    } catch (err) {
-      toast.error('同步失败');
-    }
-  };
-
-  // 应用 JSON 到界面（无需文件导入，直接使用下方文本框内容）
-  const applyJsonToUI = () => {
-    try {
-      const config = JSON.parse(jsonConfig);
-      // 字段
-      setFields(prev => prev.map(field => ({
-        ...field,
-        selected: config.fields?.includes(field.name) || false
-      })));
-      // 规则（与导入逻辑一致）
-      if (config.rules) {
-        const imported: CleaningRule[] = (config.rules as Array<any>).map((r: any, idx: number) => ({
-          id: `rule-json-${Date.now()}-${idx}`,
-          field: r.field,
-          type: r.type,
-          config: r.config ?? {},
-          enabled: true,
-          description: r.description ?? `${r.type} - ${r.field}`,
-          source: 'custom'
-        }));
-
-        setRecommendedStrategies(prev => {
-          let next = [...prev];
-          imported.forEach(rule => {
-            const matched = next.find(s => s.rule.field === rule.field && s.rule.type === rule.type);
-            if (matched) {
-              matched.selected = true;
-              rule.source = 'recommended';
-              rule.refId = matched.id;
-            }
-          });
-          return next;
-        });
-
-        setCleaningRules(imported);
-      }
-      toast.success('已应用 JSON 到界面配置');
-    } catch (error) {
-      toast.error('JSON 内容解析失败');
-    }
-  };
+  // 已移除：配置 JSON 的导入、导出与文本互操作相关方法
 
   // 勾选/取消勾选推荐策略 -> 同步到清洗规则区域
   const toggleRecommendedStrategy = (id: string, selected: boolean) => {
@@ -2347,10 +2209,40 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                 </TableCell>
                                 <TableCell className="font-medium">
                                   <Input
-                                    defaultValue={field.name}
+                                    value={fieldNameEditValues[field.name] ?? field.name}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setFieldNameEditValues(prev => ({ ...prev, [field.name]: val }));
+                                      const trimmed = val.trim();
+                                      if (!trimmed) {
+                                        setFieldNameErrors(prev => ({ ...prev, [field.name]: '字段名不能为空' }));
+                                      } else {
+                                        // 计算包含当前修改后的整体是否重复（忽略大小写）
+                                        const proposed = fields.map(f => {
+                                          if (f.name === field.name) return trimmed.toLowerCase();
+                                          return (fieldNameEditValues[f.name] ?? f.name).trim().toLowerCase();
+                                        });
+                                        const cnts: Record<string, number> = {};
+                                        proposed.forEach(n => { if (n) cnts[n] = (cnts[n] || 0) + 1; });
+                                        const isDup = cnts[trimmed.toLowerCase()] > 1;
+                                        setFieldNameErrors(prev => {
+                                          const next = { ...prev };
+                                          if (isDup) next[field.name] = '字段名重复，请使用唯一名称';
+                                          else delete next[field.name];
+                                          return next;
+                                        });
+                                      }
+                                    }}
                                     onBlur={(e) => handleFieldNameChange(field.name, e.target.value)}
+                                    aria-invalid={!!fieldNameErrors[field.name] || duplicateNameSet.has((fieldNameEditValues[field.name] ?? field.name).trim().toLowerCase())}
                                     className="h-8"
                                   />
+                                  {(fieldNameErrors[field.name] || duplicateNameSet.has((fieldNameEditValues[field.name] ?? field.name).trim().toLowerCase())) && (
+                                    <div className="mt-1 text-[11px] text-red-600 flex items-center gap-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      <span>{fieldNameErrors[field.name] || '字段名重复，请使用唯一名称'}</span>
+                                    </div>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <Select value={field.type} onValueChange={(v: string) => handleFieldTypeChange(field.name, v as FieldInfo['type'])}>
@@ -2428,7 +2320,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                   <div className="flex justify-end">
                     <Button 
                       onClick={() => setCurrentStep(2)}
-                      disabled={fields.filter(f => f.selected).length === 0}
+                      disabled={fields.filter(f => f.selected).length === 0 || hasAnyNameError}
                     >
                       下一步：配置规则
                     </Button>
@@ -2673,39 +2565,8 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                 </div>
                               </div>
                               
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <Label>字段</Label>
-                                  {(() => {
-                                    const optionNames = (selectedSourcesForView.length > 1
-                                      ? step2AggregatedFields.filter(f => f.selected).map(f => f.name)
-                                      : fields.filter(f => f.selected).map(f => f.name)
-                                    );
-                                    if (optionNames.length === 0) {
-                                      return (
-                                        <Input disabled placeholder="暂无可选字段（请切换为全部字段或选择字段）" />
-                                      );
-                                    }
-                                    return (
-                                      <Select
-                                        value={rule.field}
-                                        onValueChange={(field: string) => 
-                                          updateCleaningRule(rule.id, { field })
-                                        }
-                                      >
-                                        <SelectTrigger>
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          {optionNames.map(name => (
-                                            <SelectItem key={name} value={name}>{name}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    );
-                                  })()}
-                                </div>
-                                
+                              <div className={`grid ${rule.type === 'deduplicate' ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
+                                {/* 左侧：规则类型 */}
                                 <div>
                                   <Label>规则类型</Label>
                                   <Select
@@ -2777,6 +2638,40 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                     </SelectContent>
                                   </Select>
                                 </div>
+                                {/* 右侧：字段（当规则类型为“去重”或“数据转换”时不展示；numeric_transform 使用下方多选字段区） */}
+                                {(rule.type !== 'deduplicate' && rule.type !== 'numeric_transform') && (
+                                  <div>
+                                    <Label>字段</Label>
+                                    {(() => {
+                                      const optionNames = (selectedSourcesForView.length > 1
+                                        ? step2AggregatedFields.filter(f => f.selected).map(f => f.name)
+                                        : fields.filter(f => f.selected).map(f => f.name)
+                                      );
+                                      if (optionNames.length === 0) {
+                                        return (
+                                          <Input disabled placeholder="暂无可选字段（请切换为全部字段或选择字段）" />
+                                        );
+                                      }
+                                      return (
+                                        <Select
+                                          value={rule.field}
+                                          onValueChange={(field: string) => 
+                                            updateCleaningRule(rule.id, { field })
+                                          }
+                                        >
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {optionNames.map(name => (
+                                              <SelectItem key={name} value={name}>{name}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      );
+                                    })()}
+                                  </div>
+                                )}
                               </div>
                               
                               {/* 规则配置 */}
@@ -3408,23 +3303,20 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                         onValueChange={(m: string) => {
                                           let nextParams: any = {};
                                           switch (m) {
-                                            case 'minmax':
-                                              nextParams = { min: 0, max: 1 };
+                                            case 'log':
+                                              nextParams = { base: 'e' }; // 默认自然对数
                                               break;
-                                            case 'zscore':
-                                            nextParams = { stdType: 'sample' };
+                                            case 'sqrt':
+                                              nextParams = {};
                                               break;
-                                            case 'robust':
-                                              nextParams = { q1: 25, q3: 75 };
+                                            case 'box_cox':
+                                              nextParams = { lambda: 'auto' };
                                               break;
-                                            case 'maxabs':
-                                              nextParams = { preserveSign: true };
+                                            case 'yeo_johnson':
+                                              nextParams = { lambda: 'auto' };
                                               break;
-                                            case 'decimal_scaling':
-                                              nextParams = { auto: true, digits: 0 };
-                                              break;
-                                            case 'unit_vector':
-                                              nextParams = { axis: 'row' };
+                                            case 'quantile':
+                                              nextParams = { nQuantiles: 100, outputDistribution: 'uniform' };
                                               break;
                                             default:
                                               nextParams = {};
@@ -3436,178 +3328,172 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                                           <SelectValue placeholder="请选择转换方法" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          <SelectItem value="minmax">Min-Max归一化</SelectItem>
-                                          <SelectItem value="zscore">Z-score标准化</SelectItem>
-                                          <SelectItem value="robust">Robust标准化</SelectItem>
-                                          <SelectItem value="maxabs">Max-Abs缩放</SelectItem>
-                                          <SelectItem value="decimal_scaling">小数缩放</SelectItem>
-                                          <SelectItem value="unit_vector">单位向量归一化</SelectItem>
+                                          <SelectItem value="log">对数变换</SelectItem>
+                                          <SelectItem value="sqrt">平方根变换</SelectItem>
+                                          <SelectItem value="box_cox">Box-Cox</SelectItem>
+                                          <SelectItem value="yeo_johnson">Yeo-Johnson</SelectItem>
+                                          <SelectItem value="quantile">分位数变换</SelectItem>
                                         </SelectContent>
                                       </Select>
                                     </div>
 
-                                    {method === 'minmax' && (
+                                    {method === 'log' && (
+                                      <div className="space-y-2">
+                                        <div className="text-xs text-gray-500">对数变换（默认使用自然对数）。若存在非正值，建议先进行偏移或选择 Yeo-Johnson。</div>
+                                      </div>
+                                    )}
+
+                                    {method === 'sqrt' && (
+                                      <div className="space-y-2">
+                                        <div className="text-xs text-gray-500">平方根变换，常用于右偏分布的数据以缓解偏态。</div>
+                                      </div>
+                                    )}
+
+                                    {method === 'box_cox' && (
+                                      <div className="space-y-2">
+                                        <Label>λ (lambda)</Label>
+                                        <Input
+                                          value={typeof params.lambda === 'number' ? params.lambda : ''}
+                                          onChange={(e) =>
+                                            updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, lambda: Number(e.target.value) } } })
+                                          }
+                                          placeholder="默认自动（留空或不填）"
+                                        />
+                                        <div className="text-xs text-gray-500">Box-Cox 仅适用于正值数据。若数据包含0或负值，请选择 Yeo-Johnson。</div>
+                                      </div>
+                                    )}
+
+                                    {method === 'yeo_johnson' && (
+                                      <div className="space-y-2">
+                                        <Label>λ (lambda)</Label>
+                                        <Input
+                                          value={typeof params.lambda === 'number' ? params.lambda : ''}
+                                          onChange={(e) =>
+                                            updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, lambda: Number(e.target.value) } } })
+                                          }
+                                          placeholder="默认自动（留空或不填）"
+                                        />
+                                        <div className="text-xs text-gray-500">Yeo-Johnson 可处理包含负值的数据。</div>
+                                      </div>
+                                    )}
+
+                                    {method === 'quantile' && (
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         <div>
-                                          <Label>目标区间最小值</Label>
+                                          <Label>分位数数目</Label>
                                           <Input
                                             type="number"
-                                            value={Number.isFinite(Number(params.min)) ? params.min : ''}
+                                            value={Number.isFinite(Number(params.nQuantiles)) ? params.nQuantiles : ''}
                                             onChange={(e) =>
-                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, min: Number(e.target.value) } } })
+                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, nQuantiles: Number(e.target.value) } } })
                                             }
-                                            placeholder="默认 0"
+                                            placeholder="默认 100"
                                           />
                                         </div>
                                         <div>
-                                          <Label>目标区间最大值</Label>
-                                          <Input
-                                            type="number"
-                                            value={Number.isFinite(Number(params.max)) ? params.max : ''}
-                                            onChange={(e) =>
-                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, max: Number(e.target.value) } } })
+                                          <Label>输出分布</Label>
+                                          <Select
+                                            value={params.outputDistribution || 'uniform'}
+                                            onValueChange={(v: string) =>
+                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, outputDistribution: v } } })
                                             }
-                                            placeholder="默认 1"
-                                          />
+                                          >
+                                            <SelectTrigger>
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="uniform">均匀分布</SelectItem>
+                                              <SelectItem value="normal">正态分布</SelectItem>
+                                            </SelectContent>
+                                          </Select>
                                         </div>
-                                        {(Number.isFinite(Number(params.min)) && Number.isFinite(Number(params.max)) && Number(params.min) >= Number(params.max)) && (
-                                          <div className="md:col-span-2 flex items-start gap-2 text-red-700">
-                                            <AlertCircle className="w-4 h-4 mt-0.5" />
-                                            <span>最小值应小于最大值</span>
-                                          </div>
-                                        )}
-                                        <div className="md:col-span-2 text-xs text-gray-500">将数值线性缩放到指定区间（默认[0,1]）。</div>
-                                      </div>
-                                    )}
-
-                                    {method === 'zscore' && (
-                                      <div className="space-y-2">
-                                        <Label>标准差类型</Label>
-                                        <Select
-                                          value={params.stdType || 'sample'}
-                                          onValueChange={(v: string) =>
-                                            updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, stdType: v } } })
-                                          }
-                                        >
-                                          <SelectTrigger>
-                                            <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            <SelectItem value="sample">样本标准差 (n-1)</SelectItem>
-                                            <SelectItem value="population">总体标准差 (n)</SelectItem>
-                                          </SelectContent>
-                                        </Select>
-                                        <div className="text-xs text-gray-500">按均值0、标准差1进行标准化。</div>
-                                      </div>
-                                    )}
-
-                                    {method === 'robust' && (
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <div>
-                                          <Label>Q1百分位</Label>
-                                          <Input
-                                            type="number"
-                                            value={Number.isFinite(Number(params.q1)) ? params.q1 : ''}
-                                            onChange={(e) =>
-                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, q1: Number(e.target.value) } } })
-                                            }
-                                            placeholder="默认 25"
-                                          />
-                                        </div>
-                                        <div>
-                                          <Label>Q3百分位</Label>
-                                          <Input
-                                            type="number"
-                                            value={Number.isFinite(Number(params.q3)) ? params.q3 : ''}
-                                            onChange={(e) =>
-                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, q3: Number(e.target.value) } } })
-                                            }
-                                            placeholder="默认 75"
-                                          />
-                                        </div>
-                                        {((Number(params.q1) >= Number(params.q3)) || (Number(params.q1) <= 0) || (Number(params.q3) >= 100)) && (
-                                          <div className="md:col-span-2 flex items-start gap-2 text-red-700">
-                                            <AlertCircle className="w-4 h-4 mt-0.5" />
-                                            <span>Q1/Q3需在(0,100)之间且Q1&lt;Q3</span>
-                                          </div>
-                                        )}
-                                        <div className="md:col-span-2 text-xs text-gray-500">基于中位数与IQR进行标准化，降低异常值影响。</div>
-                                      </div>
-                                    )}
-
-                                    {method === 'maxabs' && (
-                                      <div className="space-y-2">
-                                        <div className="flex items-center space-x-2">
-                                          <Checkbox
-                                            checked={!!params.preserveSign}
-                                            onCheckedChange={(checked: boolean) =>
-                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, preserveSign: checked } } })
-                                            }
-                                          />
-                                          <Label>保留正负符号（默认）</Label>
-                                        </div>
-                                        <div className="text-xs text-gray-500">按最大绝对值缩放至[-1,1]。关闭保留符号将先取绝对值再缩放为[0,1]。</div>
-                                      </div>
-                                    )}
-
-                                    {method === 'decimal_scaling' && (
-                                      <div className="space-y-2">
-                                        <div className="flex items-center space-x-2">
-                                          <Checkbox
-                                            checked={!!params.auto}
-                                            onCheckedChange={(checked: boolean) =>
-                                              updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, auto: checked } } })
-                                            }
-                                          />
-                                          <Label>自动计算位数（默认）</Label>
-                                        </div>
-                                        {!params.auto && (
-                                          <div>
-                                            <Label>移动位数</Label>
-                                            <Input
-                                              type="number"
-                                              value={Number.isFinite(Number(params.digits)) ? params.digits : ''}
-                                              onChange={(e) =>
-                                                updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, digits: Number(e.target.value) } } })
-                                              }
-                                              placeholder="请输入非负整数"
-                                            />
-                                          </div>
-                                        )}
-                                        <div className="text-xs text-gray-500">通过移动小数点进行缩放，自动模式会根据最大绝对值确定位数。</div>
-                                      </div>
-                                    )}
-
-                                    {method === 'unit_vector' && (
-                                      <div className="space-y-2">
-                                        <Label>归一化维度</Label>
-                                        <Select
-                                          value={params.axis || 'row'}
-                                          onValueChange={(v: string) =>
-                                            updateCleaningRule(rule.id, { config: { ...rule.config, params: { ...params, axis: v } } })
-                                          }
-                                        >
-                                          <SelectTrigger>
-                                            <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            <SelectItem value="row">按样本（行）</SelectItem>
-                                            <SelectItem value="column">按特征（列）</SelectItem>
-                                          </SelectContent>
-                                        </Select>
-                                        {((params.axis || 'row') === 'row') && (selectedFields.length < 2) && (
-                                          <div className="mt-2 flex items-start gap-2 text-yellow-700">
-                                            <AlertTriangle className="w-4 h-4 mt-0.5" />
-                                            <span>按样本归一化建议选择多个字段</span>
-                                          </div>
-                                        )}
-                                        <div className="text-xs text-gray-500">将选定字段按L2范数归一为长度1。</div>
+                                        <div className="md:col-span-2 text-xs text-gray-500">分位数变换通过累积分布映射将数据转换为目标分布。</div>
                                       </div>
                                     )}
 
                                     <div className="text-xs text-gray-500">
-                                      各方法参数均有默认值：Min-Max默认[0,1]；Z-score默认样本标准差；Robust默认Q1=25%、Q3=75%；Max-Abs默认保留符号；小数缩放默认自动；单位向量默认按样本归一化。
+                                      方法说明：对数/平方根默认无额外参数；Box-Cox/Yeo-Johnson的λ不填则自动估计；分位数变换默认分位数=100、输出分布=均匀。
                                     </div>
+
+                                    {/* 分布预览缩略图与并列图 */}
+                                    {selectedFields.length > 0 && (
+                                      <div className="mt-3 space-y-2">
+                                        <div className="text-sm font-medium">分布预览</div>
+                                        {/* 改为自适应列：为每个卡片设置最小宽度，避免在宽屏但容器较窄时被强制压成很小的宽度 */}
+                                        <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
+                                          {selectedFields.map((fname) => {
+                                            // 从 rawPreviewRows 构造数值数组
+                                            const rawVals: number[] = (() => {
+                                              const arr: number[] = [];
+                                              for (const r of rawPreviewRows) {
+                                                const v = (r as any)[fname];
+                                                const num = typeof v === 'number' ? v : Number(v);
+                                                if (Number.isFinite(num)) arr.push(num);
+                                              }
+                                              // 预览缩略图采样（性能）
+                                              const MAX = 15000;
+                                              return arr.length > MAX ? reservoirSample(arr, MAX) : arr;
+                                            })();
+
+                                            // 构造变换后的数据
+                                            const transVals: number[] = (() => {
+                                              const m = method;
+                                              if (!m) return [];
+                                              if (m === 'quantile') {
+                                                const od = params?.outputDistribution || 'uniform';
+                                                const meth = od === 'normal' ? 'quantile_normal' : 'quantile_uniform';
+                                                return applyTransform(rawVals, meth as any, params);
+                                              }
+                                              return applyTransform(rawVals, m as any, params);
+                                            })();
+
+                                            const origDist = buildDistribution(rawVals);
+                                            const transDist = transVals.length > 0 ? buildDistribution(transVals) : null;
+                                            const xMin = Math.min(origDist.domain.min, transDist ? transDist.domain.min : origDist.domain.min);
+                                            const xMax = Math.max(origDist.domain.max, transDist ? transDist.domain.max : origDist.domain.max);
+                                            const yMax = Math.max(
+                                              Math.max(...origDist.histogram.map(b => b.density), 0),
+                                              transDist ? Math.max(...transDist.histogram.map(b => b.density), 0) : 0
+                                            ) * 1.15;
+
+                                            return (
+                                              <div key={fname} className="border rounded-md p-2 w-full min-w-0">
+                                                <div className="flex items-center justify-between mb-2">
+                                                  <div className="text-xs font-medium text-gray-700">{fname}</div>
+                                                  <Button variant="ghost" size="sm" onClick={() => setDistView({ ruleId: rule.id, field: fname })}>查看大图</Button>
+                                                </div>
+                                                <DistributionChart
+                                                  histogram={origDist.histogram}
+                                                  stats={origDist.stats}
+                                                  domain={origDist.domain}
+                                                  height={160}
+                                                  showBrush={false}
+                                                  fixedDomain={[xMin, xMax]}
+                                                  fixedYMax={yMax}
+                                                  color={'hsl(210 90% 55%)'}
+                                                  title={transDist ? '原始' : undefined}
+                                                />
+                                                {transDist && (
+                                                  <div className="mt-2">
+                                                    <DistributionChart
+                                                      histogram={transDist.histogram}
+                                                      stats={transDist.stats}
+                                                      domain={transDist.domain}
+                                                      height={160}
+                                                      showBrush={false}
+                                                      fixedDomain={[xMin, xMax]}
+                                                      fixedYMax={yMax}
+                                                      color={'hsl(8 80% 55%)'}
+                                                      title={'转换后'}
+                                                    />
+                                                  </div>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })()}
@@ -3707,90 +3593,7 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
                     </div>
                   </div>
 
-                  {/* JSON高级配置（底部整行，提供导入/导出与互操作） */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <Code className="h-5 w-5" />
-                          <span>JSON高级配置</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Button variant="outline" size="sm" onClick={syncUIToJson}>
-                            <RefreshCw className="h-4 w-4 mr-1" />
-                            同步界面到JSON
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={applyJsonToUI}>
-                            <Play className="h-4 w-4 mr-1" />
-                            应用JSON至界面
-                          </Button>
-                        </div>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <Label>配置JSON</Label>
-                        <Textarea
-                          value={jsonConfig}
-                          onChange={(e) => setJsonConfig(e.target.value)}
-                          className="font-mono text-sm h-96"
-                          placeholder="输入JSON配置..."
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              try {
-                                const formatted = JSON.stringify(JSON.parse(jsonConfig), null, 2);
-                                setJsonConfig(formatted);
-                                toast.success('JSON格式化完成');
-                              } catch (error) {
-                                toast.error('JSON格式错误');
-                              }
-                            }}
-                          >
-                            格式化
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              navigator.clipboard.writeText(jsonConfig);
-                              toast.success('已复制到剪贴板');
-                            }}
-                          >
-                            <Copy className="h-4 w-4 mr-1" />
-                            复制
-                          </Button>
-                          {/* 隐藏原生文件输入，改为按钮触发 */}
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="application/json"
-                            onChange={handleImportConfig}
-                            className="hidden"
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => fileInputRef.current?.click()}
-                          >
-                            <Upload className="h-4 w-4 mr-1" />
-                            导入JSON文件
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handleExportConfig}
-                          >
-                            <Download className="h-4 w-4 mr-1" />
-                            导出JSON配置
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {/* 已移除：JSON高级配置区域（包含配置文本、导入/导出、互操作按钮） */}
 
                   <div className="flex justify-between">
                     <Button variant="outline" onClick={() => setCurrentStep(1)}>
@@ -3901,6 +3704,91 @@ export function DataPreprocessing({ isOpen, onClose, datasetId, mode = 'traditio
               {'确认开始'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+      {/* 分布放大预览（原/新并列，同尺度） */}
+      <Dialog open={!!distView} onOpenChange={(open) => { if (!open) setDistView(null); }}>
+        <DialogContent className="sm:max-w-[1200px] w-[95vw] max-w-[1200px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              <span>字段分布预览</span>
+            </DialogTitle>
+            <DialogDescription>
+              {distView ? `字段：${distView.field}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {distView && (() => {
+            const rule = cleaningRules.find(r => r.id === distView.ruleId);
+            const method: string = rule?.config?.method || '';
+            const params: any = rule?.config?.params || {};
+            const field = distView.field;
+            // 构造更大采样以贴近真实数据
+            const rawValsAll: number[] = (() => {
+              const arr: number[] = [];
+              for (const r of rawPreviewRows) {
+                const v = (r as any)[field];
+                const num = typeof v === 'number' ? v : Number(v);
+                if (Number.isFinite(num)) arr.push(num);
+              }
+              const MAX = 100000; // 全图采样上限
+              return arr.length > MAX ? reservoirSample(arr, MAX) : arr;
+            })();
+            const transValsAll: number[] = (() => {
+              if (!method) return [];
+              if (method === 'quantile') {
+                const od = params?.outputDistribution || 'uniform';
+                const meth = od === 'normal' ? 'quantile_normal' : 'quantile_uniform';
+                return applyTransform(rawValsAll, meth as any, params);
+              }
+              return applyTransform(rawValsAll, method as any, params);
+            })();
+            const origDist = buildDistribution(rawValsAll);
+            const transDist = transValsAll.length > 0 ? buildDistribution(transValsAll) : null;
+            const xMin = Math.min(origDist.domain.min, transDist ? transDist.domain.min : origDist.domain.min);
+            const xMax = Math.max(origDist.domain.max, transDist ? transDist.domain.max : origDist.domain.max);
+            const yMax = Math.max(
+              Math.max(...origDist.histogram.map(b => b.density), 0),
+              transDist ? Math.max(...transDist.histogram.map(b => b.density), 0) : 0
+            ) * 1.15;
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <DistributionChart
+                    histogram={origDist.histogram}
+                    stats={origDist.stats}
+                    domain={origDist.domain}
+                    height={240}
+                    showBrush
+                    fixedDomain={[xMin, xMax]}
+                    fixedYMax={yMax}
+                    color={'hsl(210 90% 55%)'}
+                    title={'原始分布'}
+                    showStats
+                  />
+                </div>
+                <div>
+                  {transDist ? (
+                    <DistributionChart
+                      histogram={transDist.histogram}
+                      stats={transDist.stats}
+                      domain={transDist.domain}
+                      height={240}
+                      showBrush
+                      fixedDomain={[xMin, xMax]}
+                      fixedYMax={yMax}
+                      color={'hsl(8 80% 55%)'}
+                      title={'转换后分布'}
+                      showStats
+                    />
+                  ) : (
+                    <div className="p-4 text-sm text-gray-600">尚未选择转换方法</div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
       {/* 规则级确认弹窗 */}

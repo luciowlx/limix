@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Checkbox } from "./ui/checkbox";
 import { Progress } from "./ui/progress";
 import { Search, RefreshCw, X, ChevronDown, Play, Square, AlertCircle, CheckCircle, GitCompare, Star, Download, Edit, Trash2, BarChart3, TrendingUp, Award, Grid3X3, List, Columns, Settings, Eye, Wrench, RotateCcw, Loader } from "lucide-react";
+import { useLanguage } from "../i18n/LanguageContext";
 
 interface Model {
   id: string;
@@ -37,6 +38,7 @@ type SortOrder = 'asc' | 'desc';
 
 
 export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}) {
+  const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -246,8 +248,8 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
       {/* 页面标题和操作按钮 */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">模型管理</h2>
-          <p className="text-gray-600 mt-1">管理和部署您的AI模型</p>
+          <h2 className="text-2xl font-bold text-gray-900">{t("model.title")}</h2>
+          <p className="text-gray-600 mt-1">{t("model.description")}</p>
         </div>
         <div className="flex items-center space-x-2">
           {/* 模型对比按钮 */}
@@ -257,7 +259,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
             className="flex items-center gap-2"
           >
             <GitCompare className="h-4 w-4" />
-            模型对比
+            {t("model.compare")}
           </Button>
           
           {/* 刷新按钮 */}
@@ -268,7 +270,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
             className="flex items-center gap-2"
           >
             <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            刷新
+            {t("model.refresh")}
           </Button>
           
           {/* 视图切换按钮 */}
@@ -280,6 +282,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
               className="h-8 px-3"
             >
               <Grid3X3 className="h-4 w-4" />
+              <span className="ml-1 hidden sm:inline">{t("model.view.grid")}</span>
             </Button>
             <Button
               variant={viewMode === 'list' ? 'default' : 'ghost'}
@@ -288,6 +291,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
               className="h-8 px-3"
             >
               <List className="h-4 w-4" />
+              <span className="ml-1 hidden sm:inline">{t("model.view.list")}</span>
             </Button>
           </div>
           
@@ -300,7 +304,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
               className="flex items-center gap-2"
             >
               <Columns className="h-4 w-4" />
-              列设置
+              {t("model.columnsSettings")}
             </Button>
           )}
         </div>
@@ -314,7 +318,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
         >
           <Star className="h-4 w-4" />
-          模型微调
+          {t("model.tuning")}
         </Button>
 
         {/* 搜索和筛选 */}
@@ -322,7 +326,7 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
           <Input
-            placeholder="搜索模型名称或类型..."
+            placeholder={t("model.search.placeholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -331,26 +335,26 @@ export function ModelManagement({ onOpenModelTuning }: ModelManagementProps = {}
         
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-40">
-            <SelectValue placeholder="分类筛选" />
+            <SelectValue placeholder={t("model.filter.category")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部分类</SelectItem>
-            <SelectItem value="分类">分类</SelectItem>
-            <SelectItem value="回归">回归</SelectItem>
-            <SelectItem value="深度学习">深度学习</SelectItem>
+            <SelectItem value="all">{t("model.filter.category.all")}</SelectItem>
+            <SelectItem value="分类">{t("model.filter.category.classification")}</SelectItem>
+            <SelectItem value="回归">{t("model.filter.category.regression")}</SelectItem>
+            <SelectItem value="深度学习">{t("model.filter.category.dl")}</SelectItem>
             <SelectItem value="NLP">NLP</SelectItem>
           </SelectContent>
         </Select>
 
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-40">
-            <SelectValue placeholder="状态筛选" />
+            <SelectValue placeholder={t("model.filter.status")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部状态</SelectItem>
-            <SelectItem value="已完成">已完成</SelectItem>
-            <SelectItem value="训练中">训练中</SelectItem>
-            <SelectItem value="待训练">待训练</SelectItem>
+            <SelectItem value="all">{t("model.filter.status.all")}</SelectItem>
+            <SelectItem value="已完成">{t("model.filter.status.completed")}</SelectItem>
+            <SelectItem value="训练中">{t("model.filter.status.training")}</SelectItem>
+            <SelectItem value="待训练">{t("model.filter.status.pending")}</SelectItem>
           </SelectContent>
         </Select>
         </div>
